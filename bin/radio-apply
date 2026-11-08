@@ -28,9 +28,6 @@ else
     echo "alarm disabled"
 fi
 
-# The wake-up light is started by radio-player together with the volume fade (no timer of its own).
-systemctl stop radio-light.timer 2>/dev/null || true      # leftover from the old lead-time version
-
 # keep-alive tone + services: only when the relevant settings changed
 STAMP=/var/lib/alarm-radio/applied
 TONE=/usr/local/share/alarm-radio/keepalive.wav

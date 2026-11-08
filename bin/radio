@@ -21,7 +21,7 @@ case ${1:-status} in
         systemctl restart radio-play.service
         echo "playing $url" ;;
     stop)
-        systemctl stop $PLAYERS radio-light.service 2>/dev/null   # also a running wake-up light fade
+        systemctl stop $PLAYERS 2>/dev/null
         echo "stopped" ;;
     vol|volume)
         n=${2:-}

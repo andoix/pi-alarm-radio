@@ -3,8 +3,6 @@
 # store it in the config, switch audio to it. Also used by the web UI ("Speaker" → Use).
 #   radio-pair            scan for SPEAKER_NAME (put the speaker in pairing mode first)
 #   radio-pair AA:BB:..   use this device; an already paired one needs no pairing mode
-# If the device is an RGB speaker bulb ("bt-speaker", answers the bulb protocol), BULB_MAC is set too,
-# which turns on the Light controls and the wake-up light; otherwise BULB_MAC is cleared.
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 set -u
 CONF=/etc/alarm-radio.conf
@@ -52,16 +50,8 @@ if [ -n "$old" ] && [ "$old" != "$mac" ]; then
 fi
 name=$(echo "$info" | sed -n 's/^\s*Alias: //p' | tr -d '"|\\$`#&')
 
-# RGB speaker bulb? (offers a serial port and answers the bulb's status request)
-bulb=""
-if echo "$info" | grep -q "Serial Port" && BULB_MAC=$mac timeout 40 /usr/local/bin/bulb status 2>/dev/null | grep -q '"model"'; then
-    bulb=$mac
-    echo "this speaker is an RGB light bulb — light controls enabled"
-fi
-
 setconf SPEAKER_MAC "$mac"
 setconf SPEAKER_NAME "\"$name\""
-setconf BULB_MAC "$bulb"
 sed -i "s/^defaults.bluealsa.device .*/defaults.bluealsa.device \"$mac\"/" /etc/asound.conf
 echo "saved: $name ($mac)"
 systemctl restart radio-mpv.service       # the audio engine opens the speaker once, at start
