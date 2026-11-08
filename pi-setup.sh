@@ -24,6 +24,7 @@ if [ ! -f /etc/alarm-radio-stations.txt ] || [ "${FORCE_CONF:-0}" = 1 ]; then
 fi
 mkdir -p /usr/local/share/alarm-radio
 install -m 644 "$SRC"/VERSION /usr/local/share/alarm-radio/VERSION
+install -m 644 "$SRC"/assets/northup-logo.png /usr/local/share/alarm-radio/logo.png
 . /etc/alarm-radio.conf
 sed "s/SPEAKER_MAC/${SPEAKER_MAC:-00:00:00:00:00:00}/" "$SRC"/etc/asound.conf > /etc/asound.conf
 
@@ -80,5 +81,5 @@ if live; then
     radio-apply
 fi
 [ -n "$SPEAKER_MAC" ] || echo "No speaker yet: open http://$(hostname).local/ and pick one under Speaker."
-echo "Without a known WiFi network the Pi opens the open network \"AlarmRadio-Setup\" with the setup page."
+echo "Without a known WiFi network the Pi opens the open network \"NorthUP-Radio-Setup\" with the setup page."
 echo "alarm radio $(cat "$SRC"/VERSION) installed."

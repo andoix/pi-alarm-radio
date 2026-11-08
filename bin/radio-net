@@ -2,7 +2,7 @@
 """radio-net — WiFi setup for the alarm radio (NetworkManager / nmcli).
 
   radio-net daemon              (radio-net.service) join a known WiFi; if there is none, open the
-                                setup hotspot "AlarmRadio-Setup" with a captive portal (the web UI)
+                                setup hotspot "NorthUP-Radio-Setup" with a captive portal (the web UI)
   radio-net status              JSON: mode (client | ap | none), ssid, ip, last connect result
   radio-net scan                JSON list of nearby networks (cached while the hotspot is on)
   radio-net connect SSID [PSK]  join a network (started by the web UI); falls back to the previous
@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-AP = "AlarmRadio-Setup"                 # hotspot SSID and NetworkManager profile name
+AP = "NorthUP-Radio-Setup"                 # hotspot SSID and NetworkManager profile name
 AP_IP = "10.42.0.1"
 IFACE = "wlan0"
 RUN = "/run/alarm-radio"

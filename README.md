@@ -1,4 +1,8 @@
-# Pi Alarm Radio
+<img src="assets/northup-logo.png" width="96" alt="North UP krafts" align="right">
+
+# North UP Alarm Radio
+
+*by [North UP krafts](https://northup.ee), Haapsalu*
 
 An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with Bluetooth) that plays through a
 **Bluetooth speaker**. Everything is set up in a phone-friendly web page. No app and no cloud are needed.
@@ -15,9 +19,10 @@ An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with
 
 ### Option A: flash the ready-made image (easiest)
 
-1. Download `pi-alarm-radio-<version>.img.xz` from the GitHub **Releases** page.
+1. Download `northup-alarm-radio-<version>.img.xz` from the GitHub **Releases** page.
 2. In **Raspberry Pi Imager**, choose *Use custom* and pick the file. In the customisation settings, set the **WiFi** network and
    password, the **user name** and password, the time zone, and enable SSH if you want it.
+   (Or skip the WiFi: the Pi then opens the setup network **NorthUP-Radio-Setup**, see below.)
 3. Boot the Pi, then open **http://alarmradio.local/** (or the Pi's IP address, which your router shows).
 
 ### Option B: install on Raspberry Pi OS Lite
@@ -41,10 +46,14 @@ unless you pass `FORCE_CONF=1`.
 
 ## First setup
 
-1. Open **http://alarmradio.local/**.
-2. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
+1. **WiFi:** if the Pi doesn't know a WiFi network, after about 2 minutes it opens the open network **NorthUP-Radio-Setup**.
+   Join it with your phone and the setup page opens by itself (or open any web address). Choose your network, enter the password, and press
+   Connect. The setup network then disappears: reconnect the phone to your WiFi. If the Pi loses its WiFi for good later, the setup network
+   comes back by itself, and Settings → *Change WiFi network* does the same while it's connected.
+2. Open **http://alarmradio.local/**. A welcome step suggests your phone's **time zone**.
+3. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
    **Find Bluetooth speakers**, then press **Use** next to it. Speakers that are already paired switch over without pairing mode.
-3. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
+4. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
 
 The speaker can only play from one source at a time, so disconnect phones from it.
 

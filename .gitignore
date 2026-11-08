@@ -3,3 +3,5 @@ PROGRESS.md
 # filled by the image workflow
 image/stage-alarmradio/00-install/files/
 .DS_Store
+__pycache__/
+*.pyc

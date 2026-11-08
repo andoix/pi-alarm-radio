@@ -19,6 +19,7 @@ except OSError:
 URL_RE = r"https?://[A-Za-z0-9._~:/?#\[\]@!&()*+,;=%-]+"
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 NET = "/usr/local/bin/radio-net"
+LOGO = "/usr/local/share/alarm-radio/logo.png"
 NET_STATE = "/run/alarm-radio/net.json"
 HOTSPOT_NET = "10.42.0."              # clients of the setup hotspot get addresses here
 
@@ -327,6 +328,11 @@ class Handler(BaseHTTPRequestHandler):
             # reads the bulb over Bluetooth (~2 s), so the page asks only on load
             rc, out = run(BULB, "status", timeout=40)
             self.send(200, out if rc == 0 else json.dumps({"error": out}))
+        elif self.path == "/logo.png":
+            try:
+                self.send(200, open(LOGO, "rb").read(), "image/png")
+            except OSError:
+                self.send(404, "{}")
         elif self.path in ("/", "/index.html"):
             self.send(200, PAGE, "text/html; charset=utf-8")
         else:
@@ -371,14 +377,24 @@ class Handler(BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Alarm Radio</title>
+<title>North UP Alarm Radio</title>
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="/logo.png" type="image/png">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f4f1ea;--card:#fffdf8;--ink:#1f1d1a;--mut:#6f6a60;--line:#e2ddd2;--acc:#c2410c;--ok:#15803d;--bad:#b91c1c}
-@media (prefers-color-scheme:dark){:root{--bg:#171513;--card:#211e1b;--ink:#f1ece4;--mut:#a39d92;--line:#36312b;--acc:#fb923c;--ok:#4ade80;--bad:#f87171}}
+/* North UP krafts (northup.ee) brand: dark surfaces, gold accent, Outfit + Plus Jakarta Sans.
+   The fonts load from Google when online; on the offline setup hotspot the system fonts are used. */
+:root{--bg:#0d1117;--card:#161b22;--hover:#21262d;--ink:#e6edf3;--mut:#8b949e;--line:#30363d;--acc:#bba078;--on-acc:#111;--ok:#3fb950;--bad:#f85149;color-scheme:dark}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 'Plus Jakarta Sans',system-ui,-apple-system,sans-serif}
 main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
-h1{font-size:22px;margin:4px 0 2px}
+.brand{display:flex;align-items:center;gap:12px;margin:4px 0 4px}
+.brand img{width:44px;height:44px;flex:none}
+h1{font:800 22px/1.15 'Outfit',system-ui,sans-serif;margin:0;letter-spacing:.02em}
+h1 small{display:block;font:600 11px/1.4 'Outfit',system-ui,sans-serif;color:var(--acc);letter-spacing:.18em;text-transform:uppercase}
+strong{font-family:'Outfit',system-ui,sans-serif;font-weight:600;letter-spacing:.02em}
+.foot{text-align:center;font-size:13px;color:var(--mut);margin-top:6px}
+.foot a{color:var(--acc);text-decoration:none}
 .sub{color:var(--mut);font-size:14px;margin-bottom:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -390,7 +406,7 @@ input[type=range]{width:100%;accent-color:var(--acc)}
 .days label{flex:1}
 .days input{display:none}
 .days span{display:block;text-align:center;padding:8px 0;border:1px solid var(--line);border-radius:8px;font-size:14px;cursor:pointer;user-select:none}
-.days input:checked+span{background:var(--acc);border-color:var(--acc);color:#fff}
+.days input:checked+span{background:var(--acc);border-color:var(--acc);color:var(--on-acc);font-weight:600}
 .val{font-variant-numeric:tabular-nums;font-weight:600}
 .sw{position:relative;width:52px;height:30px;flex:none}
 .sw input{opacity:0;width:0;height:0}
@@ -399,7 +415,9 @@ input[type=range]{width:100%;accent-color:var(--acc)}
 .sw input:checked+i{background:var(--acc)}
 .sw input:checked+i:before{transform:translateX(22px)}
 button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:11px 14px;cursor:pointer;flex:1}
-button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;margin-top:16px}
+button:hover{background:var(--hover)}
+button.pri{background:var(--acc);border-color:var(--acc);color:var(--on-acc);width:100%;margin-top:16px}
+button.pri:hover{filter:brightness(1.08);background:var(--acc)}
 .btns{display:flex;gap:8px}
 .st{font-size:14px;color:var(--mut)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
@@ -411,7 +429,7 @@ button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;m
 .dev b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dev button{flex:none;padding:8px 14px}
 </style></head><body><main>
-<h1>Alarm Radio</h1>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1><small>North UP</small>Alarm Radio</h1></div>
 <div class="sub" id="next">&nbsp;</div>
 
 <div class="card" id="welcome" style="display:none;border-color:var(--acc)">
@@ -506,7 +524,7 @@ button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;m
   <button id="whot" style="width:100%;margin-top:10px;display:none">Open the setup hotspot instead</button>
 </div>
 </div>
-<div class="st" style="text-align:center" id="ver"></div>
+<div class="foot"><span id="ver"></span> · by <a href="https://northup.ee" target="_blank" rel="noopener">North UP krafts</a></div>
 </main>
 <script>
 const $=id=>document.getElementById(id), D=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -535,7 +553,7 @@ function show(s,form){
   $("lightcard").style.display=s.bulb?"":"none";
   if(s.bulb&&!bulbLoaded){bulbLoaded=true;loadBulb()}
   $("spkname").textContent=s.speaker||"none";
-  $("ver").textContent="Alarm Radio "+(s.version||"");
+  $("ver").textContent="North UP Alarm Radio "+(s.version||"");
   $("welcome").style.display=!s.timezone_set?"":"none";
   const n=s.net||{};
   $("netinfo").textContent=n.mode==="client"?`Connected to ${n.ssid}${n.ip?" ("+n.ip+")":""} · http://${s.host}.local`:n.mode==="ap"?"Setup hotspot is on":"—";
@@ -613,12 +631,12 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "AlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "NorthUP-Radio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
-$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the AlarmRadio-Setup hotspot?"))return;
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the NorthUP-Radio-Setup hotspot?"))return;
   await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-  wmsg('Hotspot starting. Join "AlarmRadio-Setup" with your phone.',true)};
+  wmsg('Hotspot starting. Join "NorthUP-Radio-Setup" with your phone.',true)};
 
 
 // --- Light (Bluetooth bulb) ---
@@ -677,11 +695,14 @@ async function useSpeaker(mac,name){
 SETUP_PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Alarm Radio setup</title>
+<title>North UP Alarm Radio setup</title>
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="/logo.png" type="image/png">
 <style>/*STYLE*/</style></head><body><main>
-<h1>Alarm Radio setup</h1>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1><small>North UP</small>Alarm Radio setup</h1></div>
 <div class="sub">Connect the radio to your WiFi. Everything else (time zone, speaker, alarm) comes next, on your normal network.</div>
 <div class="card">/*WIFI_FORM*/</div>
+<div class="foot">by North UP krafts · northup.ee</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -722,12 +743,12 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "AlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "NorthUP-Radio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
-$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the AlarmRadio-Setup hotspot?"))return;
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the NorthUP-Radio-Setup hotspot?"))return;
   await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-  wmsg('Hotspot starting. Join "AlarmRadio-Setup" with your phone.',true)};
+  wmsg('Hotspot starting. Join "NorthUP-Radio-Setup" with your phone.',true)};
 """))
 
 if __name__ == "__main__":

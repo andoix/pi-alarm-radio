@@ -1,5 +1,5 @@
 [Unit]
-Description=Alarm radio: WiFi — join a known network, or open the "AlarmRadio-Setup" hotspot
+Description=Alarm radio: WiFi — join a known network, or open the "NorthUP-Radio-Setup" hotspot
 After=NetworkManager.service
 Wants=NetworkManager.service
 
