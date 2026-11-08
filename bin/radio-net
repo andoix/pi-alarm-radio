@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""radio-net — WiFi setup for the alarm radio (NetworkManager / nmcli).
+
+  radio-net daemon              (radio-net.service) join a known WiFi; if there is none, open the
+                                setup hotspot "AlarmRadio-Setup" with a captive portal (the web UI)
+  radio-net status              JSON: mode (client | ap | none), ssid, ip, last connect result
+  radio-net scan                JSON list of nearby networks (cached while the hotspot is on)
+  radio-net connect SSID [PSK]  join a network (started by the web UI); falls back to the previous
+                                network or the hotspot if it fails
+  radio-net country [XX]        show / set the WiFi country (regulatory domain)
+  radio-net hotspot             open the setup hotspot now (web UI: "Set up WiFi again")
+"""
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+AP = "AlarmRadio-Setup"                 # hotspot SSID and NetworkManager profile name
+AP_IP = "10.42.0.1"
+IFACE = "wlan0"
+RUN = "/run/alarm-radio"
+STATE = f"{RUN}/net.json"               # read by the web UI
+SCAN = f"{RUN}/wifi-scan.json"
+LOCK = f"{RUN}/net.lock"
+FIRST_WAIT = 90                         # after boot: wait this long for a known network
+LOST_WAIT = 180                         # connection lost: wait this long before opening the hotspot
+RETRY = 300                             # hotspot on, nobody connected: retry known networks this often
+
+
+def nm(*args, timeout=60):
+    try:
+        p = subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return 1, "", "timeout"
+
+
+def split_t(line):
+    """split nmcli -t output (':' separated, '\\:' escaped)"""
+    return [x.replace("\\:", ":") for x in re.split(r"(?<!\\):", line)]
+
+
+def active():
+    """(name, type) of active connections on the WiFi interface"""
+    out = nm("-t", "-f", "NAME,TYPE,DEVICE", "con", "show", "--active")[1]
+    return [(f[0], f[1]) for f in map(split_t, out.splitlines()) if len(f) == 3 and f[2] == IFACE]
+
+
+def client_ssid():
+    for name, typ in active():
+        if typ == "802-11-wireless" and name != AP:
+            return name
+    return None
+
+
+def ap_on():
+    return any(name == AP for name, _ in active())
+
+
+def ip_addr():
+    out = nm("-t", "-f", "IP4.ADDRESS", "dev", "show", IFACE)[1]
+    m = re.search(r"(\d+\.\d+\.\d+\.\d+)/", out)
+    return m.group(1) if m else ""
+
+
+def write_state(**extra):
+    os.makedirs(RUN, exist_ok=True)
+    try:
+        old = json.load(open(STATE))
+    except (OSError, ValueError):
+        old = {}
+    ssid = client_ssid()
+    st = {**old, "mode": "client" if ssid else "ap" if ap_on() else "none", "ssid": ssid or "",
+          "ip": ip_addr(), "ap_ssid": AP, **extra}
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(st, f)
+    os.replace(tmp, STATE)
+    return st
+
+
+def do_scan(rescan=True):
+    out = nm("-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes" if rescan else "no",
+             timeout=40)[1]
+    best = {}
+    for f in map(split_t, out.splitlines()):
+        if len(f) != 3 or not f[0] or f[0] == AP:
+            continue
+        sig = int(f[1]) if f[1].isdigit() else 0
+        if f[0] not in best or sig > best[f[0]]["signal"]:
+            best[f[0]] = {"ssid": f[0], "signal": sig, "secure": f[2] not in ("", "--")}
+    nets = sorted(best.values(), key=lambda n: -n["signal"])
+    if nets:
+        os.makedirs(RUN, exist_ok=True)
+        json.dump(nets, open(SCAN, "w"))
+    return nets
+
+
+def ensure_ap_profile():
+    if nm("con", "show", AP)[0] == 0:
+        return
+    # open network (no password) so any phone can join; the captive portal DNS answer (dnsmasq-shared.d)
+    # makes phones show the setup page by themselves
+    nm("con", "add", "type", "wifi", "ifname", IFACE, "con-name", AP, "autoconnect", "no", "ssid", AP,
+       "802-11-wireless.mode", "ap", "802-11-wireless.band", "bg", "802-11-wireless.channel", "6",
+       "ipv4.method", "shared", "ipv4.addresses", f"{AP_IP}/24", "ipv6.method", "disabled")
+
+
+def ap_start():
+    subprocess.run(["rfkill", "unblock", "wlan"], capture_output=True)
+    do_scan()                           # the radio can't scan while it's the hotspot: remember the list now
+    ensure_ap_profile()
+    rc, _, err = nm("con", "up", AP, timeout=40)
+    print("setup hotspot on" if rc == 0 else f"setup hotspot failed: {err}", flush=True)
+    write_state()
+
+
+def ap_stop():
+    if ap_on():
+        nm("con", "down", AP)
+
+
+def wait_client(seconds):
+    t = time.time()
+    while time.time() - t < seconds:
+        if client_ssid():
+            return True
+        time.sleep(3)
+    return False
+
+
+def known_networks():
+    out = nm("-t", "-f", "NAME,TYPE", "con", "show")[1]
+    return [f[0] for f in map(split_t, out.splitlines()) if len(f) == 2 and f[1] == "802-11-wireless" and f[0] != AP]
+
+
+def try_known(seconds=45):
+    """hotspot off, let NetworkManager autoconnect to a saved network"""
+    ap_stop()
+    for name in known_networks():
+        nm("con", "up", name, timeout=seconds)
+        if client_ssid():
+            return True
+    return wait_client(5)
+
+
+def stations():
+    try:
+        out = subprocess.run(["iw", "dev", IFACE, "station", "dump"], capture_output=True, text=True).stdout
+        return out.count("Station ")
+    except OSError:
+        return 0
+
+
+def daemon():
+    subprocess.run(["rfkill", "unblock", "wlan"], capture_output=True)
+    os.makedirs(RUN, exist_ok=True)
+    boot, lost, ap_since = time.time(), None, None
+    while True:
+        with open(LOCK, "w") as lk:
+            try:
+                fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:     # a connect from the web UI is running
+                time.sleep(3)
+                continue
+            if client_ssid():
+                if lost or ap_since:
+                    print(f"connected to {client_ssid()}", flush=True)
+                lost = ap_since = None
+                ap_stop()
+            elif ap_on():
+                ap_since = ap_since or time.time()
+                if time.time() - ap_since > RETRY and stations() == 0 and known_networks():
+                    print("retrying saved networks", flush=True)
+                    if try_known():
+                        print(f"connected to {client_ssid()}", flush=True)
+                        ap_since = None
+                    else:
+                        ap_start()
+                        ap_since = time.time()
+            else:
+                lost = lost or time.time()
+                limit = FIRST_WAIT if time.time() - boot < FIRST_WAIT + 30 else LOST_WAIT
+                if not known_networks() or time.time() - lost > limit:
+                    print("no WiFi connection — opening the setup hotspot", flush=True)
+                    ap_start()
+                    ap_since = time.time()
+            write_state()
+        time.sleep(10)
+
+
+def connect(ssid, psk):
+    with open(LOCK, "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        prev = client_ssid()
+        write_state(result={"ssid": ssid, "state": "connecting"})
+        time.sleep(2)                   # let the web UI answer before the hotspot goes away
+        ap_stop()
+        time.sleep(2)
+        nm("dev", "wifi", "rescan", timeout=15)
+        time.sleep(4)
+        args = ["--wait", "45", "dev", "wifi", "connect", ssid, "ifname", IFACE, "name", ssid]
+        if psk:
+            args[6:6] = ["password", psk]
+        if not any(n["ssid"] == ssid for n in do_scan(rescan=False)):
+            args += ["hidden", "yes"]
+        nm("con", "delete", ssid)       # replace an old profile with the same name
+        rc, out, err = nm(*args, timeout=70)
+        if rc == 0 and wait_client(10):
+            print(f"connected to {ssid}", flush=True)
+            write_state(result={"ssid": ssid, "state": "ok"})
+            return 0
+        print(f"could not connect to {ssid}: {err or out}", flush=True)
+        nm("con", "delete", ssid)
+        msg = "wrong password?" if re.search(r"[Ss]ecrets|802-1X|password", err) else (err or "failed")
+        if not (prev and nm("con", "up", prev, timeout=45)[0] == 0):
+            ap_start()
+        write_state(result={"ssid": ssid, "state": "failed", "msg": msg})
+        return 1
+
+
+def country(code=None):
+    if code:
+        if not re.fullmatch(r"[A-Z]{2}", code):
+            sys.exit("country must be two letters, e.g. EE, DE, US")
+        if subprocess.run(["sh", "-c", "command -v raspi-config"], capture_output=True).returncode == 0:
+            subprocess.run(["raspi-config", "nonint", "do_wifi_country", code], capture_output=True)
+        subprocess.run(["iw", "reg", "set", code], capture_output=True)
+        subprocess.run(["rfkill", "unblock", "wlan"], capture_output=True)
+    out = subprocess.run(["iw", "reg", "get"], capture_output=True, text=True).stdout
+    m = re.search(r"country ([A-Z0-9]{2})", out)
+    return m.group(1) if m else ""
+
+
+def main(a):
+    cmd = a[0] if a else "status"
+    if cmd == "daemon":
+        daemon()
+    elif cmd == "status":
+        print(json.dumps({**write_state(), "country": country()}))
+    elif cmd == "scan":
+        nets = do_scan(rescan=True) if not ap_on() else []
+        if not nets:
+            try:
+                nets = json.load(open(SCAN))
+            except (OSError, ValueError):
+                nets = []
+        print(json.dumps(nets))
+    elif cmd == "connect" and len(a) >= 2:
+        sys.exit(connect(a[1], a[2] if len(a) > 2 else ""))
+    elif cmd == "country":
+        print(country(a[1].upper() if len(a) > 1 else None))
+    elif cmd == "hotspot":
+        with open(LOCK, "w") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            ap_start()
+    else:
+        print(__doc__)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

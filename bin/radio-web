@@ -5,6 +5,7 @@ Reads/writes /etc/alarm-radio.conf, then runs radio-apply. Standard library only
 """
 import json
 import re
+import socket
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -17,6 +18,9 @@ except OSError:
     VERSION = "dev"
 URL_RE = r"https?://[A-Za-z0-9._~:/?#\[\]@!&()*+,;=%-]+"
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+NET = "/usr/local/bin/radio-net"
+NET_STATE = "/run/alarm-radio/net.json"
+HOTSPOT_NET = "10.42.0."              # clients of the setup hotspot get addresses here
 
 
 def run(*cmd, timeout=30):
@@ -122,6 +126,10 @@ def status():
         "now_url": now_url,
         "next": nxt if c.get("ALARM_ENABLED") == "yes" else "",
         "stations": read_stations(),
+        "timezone": c.get("TIMEZONE", ""),
+        "timezone_set": c.get("TIMEZONE_SET") == "yes",
+        "host": socket.gethostname(),
+        "net": net_state(),
         "version": VERSION,
         "bulb": bool(c.get("BULB_MAC")),
         "speaker_mac": mac,
@@ -170,6 +178,55 @@ def save(d):
     if rc:
         raise ValueError(out)
     return out
+
+
+def net_state():
+    try:
+        return json.load(open(NET_STATE))
+    except (OSError, ValueError):
+        return {}
+
+
+_TZ = []
+
+
+def timezones():
+    if not _TZ:
+        _TZ.extend(run("timedatectl", "list-timezones")[1].split())
+    return _TZ
+
+
+def set_timezone(d):
+    tz = str(d.get("tz", ""))
+    if tz not in timezones():
+        raise ValueError("unknown time zone")
+    rc, out = run("timedatectl", "set-timezone", tz)
+    if rc:
+        raise ValueError(out)
+    write_conf({"TIMEZONE": tz, "TIMEZONE_SET": "yes"})
+    rc, out = run("/usr/local/bin/radio-apply", timeout=60)    # the alarm timer carries the zone
+    if rc:
+        raise ValueError(out)
+    return f"time zone {tz}"
+
+
+def wifi_connect(d):
+    ssid, psk = str(d.get("ssid", "")), str(d.get("psk", ""))
+    if not 1 <= len(ssid.encode()) <= 32 or "\n" in ssid:
+        raise ValueError("network name must be 1-32 characters")
+    if psk and not 8 <= len(psk) <= 63:
+        raise ValueError("WiFi password must be 8-63 characters")
+    cc = str(d.get("country", "")).upper()
+    if cc:
+        if not re.fullmatch(r"[A-Z]{2}", cc):
+            raise ValueError("country must be two letters, e.g. EE")
+        run(NET, "country", cc)
+    # runs on its own (the hotspot, and with it this connection, goes away while it works)
+    run("systemctl", "stop", "radio-net-connect.service")
+    rc, out = run("systemd-run", "--quiet", "--collect", "--unit=radio-net-connect", NET, "connect", ssid, psk)
+    if rc:
+        raise ValueError(out)
+    return f"connecting to {ssid}"
 
 
 BULB = "/usr/local/bin/bulb"
@@ -249,9 +306,21 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def via_hotspot(self):
+        return self.client_address[0].startswith(HOTSPOT_NET)
+
     def do_GET(self):
         if self.path == "/api/status":
             self.send(200, json.dumps(status()))
+        elif self.path == "/api/wifi/scan":
+            self.send(200, run(NET, "scan", timeout=60)[1] or "[]")
+        elif self.path == "/api/net":
+            self.send(200, run(NET, "status", timeout=20)[1] or "{}")
+        elif self.path == "/api/timezones":
+            self.send(200, json.dumps(timezones()))
+        elif self.via_hotspot() and not self.path.startswith("/api/"):
+            # captive portal: phones on the setup hotspot get the WiFi setup page for any URL
+            self.send(200, SETUP_PAGE, "text/html; charset=utf-8")
         elif self.path == "/api/bt/scan":
             self.send(200, json.dumps({"devices": bt_scan()}))
         elif self.path == "/api/bulb":
@@ -282,6 +351,14 @@ class Handler(BaseHTTPRequestHandler):
                 msg = bulb(d)
             elif self.path == "/api/bt/use":
                 msg = bt_use(d)
+            elif self.path == "/api/wifi/connect":
+                msg = wifi_connect(d)
+                return self.send(200, json.dumps({"ok": True, "msg": msg}))
+            elif self.path == "/api/wifi/hotspot":
+                run("systemd-run", "--quiet", "--collect", "--unit=radio-net-hotspot", NET, "hotspot")
+                return self.send(200, json.dumps({"ok": True, "msg": "setup hotspot starting"}))
+            elif self.path == "/api/timezone":
+                msg = set_timezone(d)
             elif self.path.startswith("/api/") and self.path[5:] in ACTIONS:
                 msg = run(*ACTIONS[self.path[5:]])[1]
             else:
@@ -336,6 +413,13 @@ button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;m
 </style></head><body><main>
 <h1>Alarm Radio</h1>
 <div class="sub" id="next">&nbsp;</div>
+
+<div class="card" id="welcome" style="display:none;border-color:var(--acc)">
+  <strong>Welcome!</strong>
+  <div class="st" style="margin-top:4px">Three quick steps: 1. time zone (below) · 2. Bluetooth speaker (Speaker card at the bottom) · 3. alarm.</div>
+  <label class="f">Time zone</label>
+  <div class="row"><select id="wtz"></select><button id="wtzsave" style="flex:none">Save</button></div>
+</div>
 
 <div class="card">
   <div class="row"><strong>Alarm</strong><label class="sw"><input type="checkbox" id="enabled"><i></i></label></div>
@@ -401,6 +485,27 @@ button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;m
   <div id="btlist"></div>
   <div id="btmsg" class="st" style="margin-top:8px"></div>
 </div>
+<div class="card">
+  <strong>Settings</strong>
+  <label class="f">Time zone</label>
+  <div class="row"><select id="tz"></select><button id="tzsave" style="flex:none">Save</button></div>
+  <div class="st" id="tzmsg" style="margin-top:6px"></div>
+  <label class="f">WiFi</label>
+  <div class="st" id="netinfo"></div>
+  <button id="wchange" style="width:100%;margin-top:10px">Change WiFi network</button>
+  <div id="wform" style="display:none">
+  <label class="f">Network</label>
+  <div id="wnets" class="st">Searching…</div>
+  <input type="text" id="wssid" placeholder="Network name" style="width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);margin-top:8px" autocapitalize="off" autocorrect="off">
+  <label class="f">Password</label>
+  <input type="password" id="wpsk" placeholder="WiFi password (empty for an open network)" style="width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
+  <label class="f">Country <span class="st">(WiFi rules)</span></label>
+  <input type="text" id="wcc" maxlength="2" placeholder="EE" style="width:70px;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-transform:uppercase">
+  <button class="pri" id="wgo">Connect</button>
+  <div id="wmsg" class="st" style="margin-top:10px"></div>
+  <button id="whot" style="width:100%;margin-top:10px;display:none">Open the setup hotspot instead</button>
+</div>
+</div>
 <div class="st" style="text-align:center" id="ver"></div>
 </main>
 <script>
@@ -431,6 +536,10 @@ function show(s,form){
   if(s.bulb&&!bulbLoaded){bulbLoaded=true;loadBulb()}
   $("spkname").textContent=s.speaker||"none";
   $("ver").textContent="Alarm Radio "+(s.version||"");
+  $("welcome").style.display=!s.timezone_set?"":"none";
+  const n=s.net||{};
+  $("netinfo").textContent=n.mode==="client"?`Connected to ${n.ssid}${n.ip?" ("+n.ip+")":""} · http://${s.host}.local`:n.mode==="ap"?"Setup hotspot is on":"—";
+  if(form)loadTz(s);
   $("next").textContent=s.enabled&&s.next?"Next alarm: "+s.next:"Alarm is off";
   $("speaker").innerHTML=`<span class="dot" style="background:var(--${s.connected?"ok":"bad"})"></span>${s.speaker} ${s.connected?"connected":"not connected"}`;
   const st=(s.stations||[]).find(x=>x.url===s.now_url);
@@ -464,6 +573,53 @@ document.querySelectorAll("[data-a]").forEach(b=>b.onclick=async()=>{
 });
 $("live").addEventListener("change",()=>api("vol",{volume:+$("live").value}));
 refresh(true);setInterval(()=>refresh(false),5000);
+
+// --- time zone ---
+let tzList=null;
+async function loadTz(s){
+  if(!tzList)tzList=await api("timezones");
+  const guess=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const opts=tzList.map(z=>`<option>${z}</option>`).join("");
+  $("tz").innerHTML=opts;$("wtz").innerHTML=opts;
+  $("tz").value=s.timezone;
+  $("wtz").value=tzList.includes(guess)?guess:s.timezone;   // welcome: suggest the phone's zone
+}
+async function saveTz(sel){
+  const r=await api("timezone",{tz:sel.value});
+  $("tzmsg").textContent=r.ok?"Saved: "+sel.value:r.msg;$("tzmsg").style.color=r.ok?"var(--ok)":"var(--bad)";
+  if(r.ok)show(r.status,true);
+}
+$("tzsave").onclick=()=>saveTz($("tz"));
+$("wtzsave").onclick=()=>saveTz($("wtz"));
+$("wchange").onclick=()=>{$("wform").style.display="";$("wchange").style.display="none";wifiInit(false)};
+
+// --- WiFi form (setup page and Settings) ---
+const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function wifiInit(setup){
+  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;
+      if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
+  try{
+    const nets=await (await fetch("/api/wifi/scan")).json();
+    $("wnets").innerHTML=nets.length?nets.map(n=>`<div class="dev"><div><b>${escw(n.ssid)}</b><span class="st">${n.secure?"🔒 ":""}signal ${n.signal} %</span></div><button data-ssid="${escw(n.ssid)}">Choose</button></div>`).join(""):"No networks found. Type the name below (hidden networks too).";
+    document.querySelectorAll("#wnets button").forEach(b=>b.onclick=()=>{$("wssid").value=b.dataset.ssid;$("wpsk").focus()});
+  }catch(e){$("wnets").textContent="Could not search for networks."}
+  if(!setup)$("whot").style.display="";
+}
+function wmsg(t,ok){$("wmsg").textContent=t;$("wmsg").style.color=ok===false?"var(--bad)":ok?"var(--ok)":""}
+$("wgo").onclick=async()=>{
+  const ssid=$("wssid").value.trim(),psk=$("wpsk").value,cc=$("wcc").value.trim().toUpperCase();
+  if(!ssid)return wmsg("Choose or type a network name.",false);
+  $("wgo").disabled=true;
+  try{
+    const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
+    if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "AlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+  }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
+};
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the AlarmRadio-Setup hotspot?"))return;
+  await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  wmsg('Hotspot starting. Join "AlarmRadio-Setup" with your phone.',true)};
+
 
 // --- Light (Bluetooth bulb) ---
 let bmode="rgb", bulbLoaded=false;
@@ -517,6 +673,62 @@ async function useSpeaker(mac,name){
 }
 </script></body></html>
 """
+
+SETUP_PAGE = r"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alarm Radio setup</title>
+<style>/*STYLE*/</style></head><body><main>
+<h1>Alarm Radio setup</h1>
+<div class="sub">Connect the radio to your WiFi. Everything else (time zone, speaker, alarm) comes next, on your normal network.</div>
+<div class="card">/*WIFI_FORM*/</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+/*WIFI_JS*/
+wifiInit(true);
+</script></body></html>
+"""
+SETUP_PAGE = (SETUP_PAGE.replace("/*STYLE*/", PAGE.split("<style>")[1].split("</style>")[0])
+              .replace("/*WIFI_FORM*/", """
+  <label class="f">Network</label>
+  <div id="wnets" class="st">Searching…</div>
+  <input type="text" id="wssid" placeholder="Network name" style="width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);margin-top:8px" autocapitalize="off" autocorrect="off">
+  <label class="f">Password</label>
+  <input type="password" id="wpsk" placeholder="WiFi password (empty for an open network)" style="width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)">
+  <label class="f">Country <span class="st">(WiFi rules)</span></label>
+  <input type="text" id="wcc" maxlength="2" placeholder="EE" style="width:70px;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-transform:uppercase">
+  <button class="pri" id="wgo">Connect</button>
+  <div id="wmsg" class="st" style="margin-top:10px"></div>
+  <button id="whot" style="width:100%;margin-top:10px;display:none">Open the setup hotspot instead</button>
+""").replace("/*WIFI_JS*/", r"""
+// --- WiFi form (setup page and Settings) ---
+const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function wifiInit(setup){
+  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;
+      if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
+  try{
+    const nets=await (await fetch("/api/wifi/scan")).json();
+    $("wnets").innerHTML=nets.length?nets.map(n=>`<div class="dev"><div><b>${escw(n.ssid)}</b><span class="st">${n.secure?"🔒 ":""}signal ${n.signal} %</span></div><button data-ssid="${escw(n.ssid)}">Choose</button></div>`).join(""):"No networks found. Type the name below (hidden networks too).";
+    document.querySelectorAll("#wnets button").forEach(b=>b.onclick=()=>{$("wssid").value=b.dataset.ssid;$("wpsk").focus()});
+  }catch(e){$("wnets").textContent="Could not search for networks."}
+  if(!setup)$("whot").style.display="";
+}
+function wmsg(t,ok){$("wmsg").textContent=t;$("wmsg").style.color=ok===false?"var(--bad)":ok?"var(--ok)":""}
+$("wgo").onclick=async()=>{
+  const ssid=$("wssid").value.trim(),psk=$("wpsk").value,cc=$("wcc").value.trim().toUpperCase();
+  if(!ssid)return wmsg("Choose or type a network name.",false);
+  $("wgo").disabled=true;
+  try{
+    const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
+    if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "AlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+  }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
+};
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the AlarmRadio-Setup hotspot?"))return;
+  await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  wmsg('Hotspot starting. Join "AlarmRadio-Setup" with your phone.',true)};
+"""))
 
 if __name__ == "__main__":
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
