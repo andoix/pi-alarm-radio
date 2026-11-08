@@ -81,5 +81,5 @@ if live; then
     radio-apply
 fi
 [ -n "$SPEAKER_MAC" ] || echo "No speaker yet: open http://$(hostname).local/ and pick one under Speaker."
-echo "Without a known WiFi network the Pi opens the open network \"NorthUP-Radio-Setup\" with the setup page."
+echo "Without a known WiFi network the Pi opens the open network \"PiAlarmRadio-Setup\" with the setup page."
 echo "alarm radio $(cat "$SRC"/VERSION) installed."

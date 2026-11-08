@@ -377,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>North UP Alarm Radio</title>
+<title>PiAlarmRadio</title>
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="/logo.png" type="image/png">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
@@ -391,7 +391,7 @@ main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
 .brand{display:flex;align-items:center;gap:12px;margin:4px 0 4px}
 .brand img{width:44px;height:44px;flex:none}
 h1{font:800 22px/1.15 'Outfit',system-ui,sans-serif;margin:0;letter-spacing:.02em}
-h1 small{display:block;font:600 11px/1.4 'Outfit',system-ui,sans-serif;color:var(--acc);letter-spacing:.18em;text-transform:uppercase}
+h1 small{display:block;font:600 11px/1.6 'Plus Jakarta Sans',system-ui,sans-serif;color:var(--acc);letter-spacing:.08em;margin-top:2px}
 strong{font-family:'Outfit',system-ui,sans-serif;font-weight:600;letter-spacing:.02em}
 .foot{text-align:center;font-size:13px;color:var(--mut);margin-top:6px}
 .foot a{color:var(--acc);text-decoration:none}
@@ -429,7 +429,7 @@ button.pri:hover{filter:brightness(1.08);background:var(--acc)}
 .dev b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dev button{flex:none;padding:8px 14px}
 </style></head><body><main>
-<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1><small>North UP</small>Alarm Radio</h1></div>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>PiAlarmRadio<small>by North UP krafts</small></h1></div>
 <div class="sub" id="next">&nbsp;</div>
 
 <div class="card" id="welcome" style="display:none;border-color:var(--acc)">
@@ -553,7 +553,7 @@ function show(s,form){
   $("lightcard").style.display=s.bulb?"":"none";
   if(s.bulb&&!bulbLoaded){bulbLoaded=true;loadBulb()}
   $("spkname").textContent=s.speaker||"none";
-  $("ver").textContent="North UP Alarm Radio "+(s.version||"");
+  $("ver").textContent="PiAlarmRadio "+(s.version||"");
   $("welcome").style.display=!s.timezone_set?"":"none";
   const n=s.net||{};
   $("netinfo").textContent=n.mode==="client"?`Connected to ${n.ssid}${n.ip?" ("+n.ip+")":""} · http://${s.host}.local`:n.mode==="ap"?"Setup hotspot is on":"—";
@@ -631,12 +631,12 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "NorthUP-Radio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
-$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the NorthUP-Radio-Setup hotspot?"))return;
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;
   await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-  wmsg('Hotspot starting. Join "NorthUP-Radio-Setup" with your phone.',true)};
+  wmsg('Hotspot starting. Join "PiAlarmRadio-Setup" with your phone.',true)};
 
 
 // --- Light (Bluetooth bulb) ---
@@ -695,11 +695,11 @@ async function useSpeaker(mac,name){
 SETUP_PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>North UP Alarm Radio setup</title>
+<title>PiAlarmRadio setup</title>
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="/logo.png" type="image/png">
 <style>/*STYLE*/</style></head><body><main>
-<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1><small>North UP</small>Alarm Radio setup</h1></div>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>PiAlarmRadio setup<small>by North UP krafts</small></h1></div>
 <div class="sub">Connect the radio to your WiFi. Everything else (time zone, speaker, alarm) comes next, on your normal network.</div>
 <div class="card">/*WIFI_FORM*/</div>
 <div class="foot">by North UP krafts · northup.ee</div>
@@ -743,12 +743,12 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "NorthUP-Radio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
-$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the NorthUP-Radio-Setup hotspot?"))return;
+$("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;
   await fetch("/api/wifi/hotspot",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-  wmsg('Hotspot starting. Join "NorthUP-Radio-Setup" with your phone.',true)};
+  wmsg('Hotspot starting. Join "PiAlarmRadio-Setup" with your phone.',true)};
 """))
 
 if __name__ == "__main__":

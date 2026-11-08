@@ -5,7 +5,7 @@ it also runs on the Pi Zero W). It installs the radio with `pi-setup.sh` (`IMAGE
 
 - The image is built by GitHub Actions (`.github/workflows/image.yml`, using `usimd/pi-gen-action`) on every `v*` tag. The
   `.img.xz` is attached to the GitHub release. You can also start the workflow by hand (*Actions → Build OS image → Run workflow*).
-- Image file `northup-alarm-radio-<version>.img.xz`, hostname `alarmradio`, time zone `Europe/Tallinn`. **No default user or password**, and SSH is off. Set the user, WiFi and SSH in
+- Image file `pialarmradio-<version>.img.xz`, hostname `alarmradio`, time zone `Europe/Tallinn`. **No default user or password**, and SSH is off. Set the user, WiFi and SSH in
   Raspberry Pi Imager's customisation settings (the image uses cloud-init, like stock Raspberry Pi OS trixie).
 - The workflow copies `bin/ systemd/ etc/ assets/ pi-setup.sh VERSION` into `stage-alarmradio/00-install/files/alarm-radio/` before
   the build. That folder isn't committed.
