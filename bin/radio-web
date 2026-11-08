@@ -1,0 +1,522 @@
+#!/usr/bin/env python3
+"""radio-web — small web UI for the alarm radio (http://<hostname>.local/).
+
+Reads/writes /etc/alarm-radio.conf, then runs radio-apply. Standard library only.
+"""
+import json
+import re
+import subprocess
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+CONF = "/etc/alarm-radio.conf"
+STATIONS = "/etc/alarm-radio-stations.txt"
+PORT = 80
+try:
+    VERSION = open("/usr/local/share/alarm-radio/VERSION").read().strip()
+except OSError:
+    VERSION = "dev"
+URL_RE = r"https?://[A-Za-z0-9._~:/?#\[\]@!&()*+,;=%-]+"
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def run(*cmd, timeout=30):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except subprocess.TimeoutExpired:
+        return 1, "timeout"
+
+
+def read_conf():
+    conf = {}
+    for line in open(CONF):
+        m = re.match(r"^([A-Z_]+)=(\"[^\"]*\"|'[^']*'|\S*)", line)
+        if m:
+            conf[m.group(1)] = m.group(2).strip("\"'")
+    return conf
+
+
+def write_conf(updates):
+    lines = open(CONF).read().splitlines(keepends=True)
+    done = set()
+    for i, line in enumerate(lines):
+        m = re.match(r"^([A-Z_]+)=(\"[^\"]*\"|'[^']*'|\S*)(.*)$", line.rstrip("\n"))
+        if m and m.group(1) in updates:
+            lines[i] = f"{m.group(1)}={updates[m.group(1)]}{m.group(3)}\n"
+            done.add(m.group(1))
+    lines += [f"{k}={v}\n" for k, v in updates.items() if k not in done]
+    with open(CONF, "w") as f:
+        f.writelines(lines)
+
+
+def parse_days(spec):
+    """'Mon..Fri' / 'Sat,Sun' / '*' -> list of day names."""
+    if spec in ("", "*"):
+        return list(DAYS)
+    out = []
+    for part in spec.split(","):
+        if ".." in part:
+            a, b = part.split("..")
+            out += DAYS[DAYS.index(a):DAYS.index(b) + 1]
+        elif part in DAYS:
+            out.append(part)
+    return out
+
+
+def days_spec(days):
+    days = [d for d in DAYS if d in days]
+    if len(days) == 7:
+        return '"*"'
+    if days == DAYS[:5]:
+        return "Mon..Fri"
+    return ",".join(days)
+
+
+def active(unit):
+    return run("systemctl", "is-active", unit)[1] == "active"
+
+
+def read_stations():
+    """Name|URL lines from STATIONS; # comments and bad lines are skipped."""
+    out = []
+    try:
+        for line in open(STATIONS, encoding="utf-8"):
+            name, sep, url = line.strip().partition("|")
+            if sep and not name.startswith("#") and url.startswith(("http://", "https://")):
+                out.append({"name": name.strip(), "url": url.strip()})
+    except OSError:
+        pass
+    return out
+
+
+def mpv_get(prop):
+    return run("sh", "-c", f"echo '{{\"command\":[\"get_property\",\"{prop}\"]}}' | "
+               "socat -t 2 - UNIX-CONNECT:/run/alarm-radio/mpv.sock", timeout=3)[1]
+
+
+def status():
+    c = read_conf()
+    mac = c.get("SPEAKER_MAC", "")
+    bt = mac and "Connected: yes" in run("bluetoothctl", "info", mac)[1]
+    playing = next((m for m, u in [("alarm", "radio-alarm"), ("test", "radio-test"),
+                                   ("radio", "radio-play")] if active(u)), None)
+    nxt = run("systemctl", "show", "radio-alarm.timer", "-p", "NextElapseUSecRealtime", "--value")[1]
+    live_vol = now_url = None
+    if playing:
+        m = re.search(r'"data":([0-9.]+)', mpv_get("volume"))
+        live_vol = round(float(m.group(1))) if m else None
+        m = re.search(r'"data":"([^"]*)"', mpv_get("path"))
+        now_url = m.group(1) if m else None
+    return {
+        "enabled": c.get("ALARM_ENABLED") == "yes",
+        "time": c.get("ALARM_TIME", "07:00"),
+        "days": parse_days(c.get("ALARM_DAYS", "Mon..Fri")),
+        "url": c.get("STREAM_URL", ""),
+        "volume": int(c.get("VOLUME", 60)),
+        "fade": int(c.get("FADE_SEC", 45)),
+        "duration": int(c.get("DURATION_MIN", 60)),
+        "speaker": c.get("SPEAKER_NAME", ""),
+        "connected": bool(bt),
+        "playing": playing,
+        "live_volume": live_vol,
+        "now_url": now_url,
+        "next": nxt if c.get("ALARM_ENABLED") == "yes" else "",
+        "stations": read_stations(),
+        "version": VERSION,
+        "bulb": bool(c.get("BULB_MAC")),
+        "speaker_mac": mac,
+        "light": c.get("LIGHT_ENABLED") == "yes",
+        "light_color": c.get("LIGHT_COLOR", "ffb060"),
+        "light_bright": int(c.get("LIGHT_BRIGHT", 100)),
+    }
+
+
+def light_color(v):
+    v = str(v).lstrip("#").lower()
+    if not re.fullmatch(r"[0-9a-f]{6}", v):
+        raise ValueError("light colour must be RRGGBB")
+    return v
+
+
+def save(d):
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", d.get("time", "")):
+        raise ValueError("time must be HH:MM")
+    days = [x for x in d.get("days", []) if x in DAYS]
+    if not days:
+        raise ValueError("pick at least one day")
+    url = d.get("url", "").strip()
+    if not re.fullmatch(URL_RE, url):
+        raise ValueError("stream URL must be a plain http(s):// address")
+
+    def num(key, lo, hi):
+        v = int(d.get(key))
+        if not lo <= v <= hi:
+            raise ValueError(f"{key} must be {lo}-{hi}")
+        return str(v)
+
+    write_conf({
+        "ALARM_ENABLED": "yes" if d.get("enabled") else "no",
+        "ALARM_TIME": d["time"],
+        "ALARM_DAYS": days_spec(days),
+        "STREAM_URL": f"'{url}'",
+        "VOLUME": num("volume", 0, 100),
+        "FADE_SEC": num("fade", 0, 600),
+        "DURATION_MIN": num("duration", 1, 240),
+        "LIGHT_ENABLED": "yes" if d.get("light") else "no",
+        "LIGHT_COLOR": light_color(d.get("light_color", "ffb060")),
+        "LIGHT_BRIGHT": num("light_bright", 1, 100),
+    })
+    rc, out = run("/usr/local/bin/radio-apply", timeout=60)
+    if rc:
+        raise ValueError(out)
+    return out
+
+
+BULB = "/usr/local/bin/bulb"
+MAC_RE = r"([0-9A-F]{2}:){5}[0-9A-F]{2}"
+
+
+def bt_scan():
+    """Scan ~12 s, return nearby audio output devices (speakers/headphones) plus already paired ones."""
+    run("bluetoothctl", "--timeout", "12", "scan", "on", timeout=25)
+    current = read_conf().get("SPEAKER_MAC", "")
+    out = []
+    for line in run("bluetoothctl", "devices")[1].splitlines():
+        parts = line.split(" ", 2)
+        if len(parts) < 3 or not re.fullmatch(MAC_RE, parts[1]):
+            continue
+        mac, info = parts[1], run("bluetoothctl", "info", parts[1], timeout=5)[1]
+        audio = "Audio Sink" in info or re.search(r"Icon: audio-(card|headset|headphones|speaker)", info)
+        name = (re.search(r"^\s*Alias: (.*)$", info, re.M) or re.search(r"^\s*Name: (.*)$", info, re.M))
+        name = name.group(1).strip() if name else ""
+        if not audio or not name or name.replace("-", ":") == mac:
+            continue
+        rssi = re.search(r"RSSI: \S+ \((-?\d+)\)", info)
+        out.append({"mac": mac, "name": name, "paired": "Bonded: yes" in info,
+                    "connected": "Connected: yes" in info, "current": mac == current,
+                    "rssi": int(rssi.group(1)) if rssi else None})
+    out.sort(key=lambda d: (not d["current"], not d["paired"], -(d["rssi"] or -999)))
+    return out
+
+
+def bt_use(d):
+    mac = str(d.get("mac", "")).upper()
+    if not re.fullmatch(MAC_RE, mac):
+        raise ValueError("bad Bluetooth address")
+    rc, out = run("/usr/local/bin/radio-pair", mac, timeout=150)
+    if rc:
+        raise ValueError(out.splitlines()[-1] if out else "pairing failed")
+    return out
+
+
+def bulb(d):
+    """{action: on|off|white|rgb, rgb: 'RRGGBB', bright: 0-100}"""
+    act = d.get("action")
+    bright = str(max(0, min(100, int(d.get("bright", 100)))))
+    if act in ("on", "off"):
+        args = [act]
+    elif act == "white":
+        args = ["white", bright]
+    elif act == "rgb":
+        rgb = str(d.get("rgb", "")).lstrip("#")
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}", rgb):
+            raise ValueError("colour must be RRGGBB")
+        args = ["rgb", rgb, bright]
+    else:
+        raise ValueError("unknown bulb action")
+    rc, out = run(BULB, *args, timeout=60)
+    if rc:
+        raise ValueError(out)
+    return out
+
+
+ACTIONS = {
+    "stop": ["/usr/local/bin/radio", "stop"],
+    "test": ["/usr/local/bin/radio", "test-alarm"],
+}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def send(self, code, body, ctype="application/json"):
+        data = body.encode() if isinstance(body, str) else body
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path == "/api/status":
+            self.send(200, json.dumps(status()))
+        elif self.path == "/api/bt/scan":
+            self.send(200, json.dumps({"devices": bt_scan()}))
+        elif self.path == "/api/bulb":
+            # reads the bulb over Bluetooth (~2 s), so the page asks only on load
+            rc, out = run(BULB, "status", timeout=40)
+            self.send(200, out if rc == 0 else json.dumps({"error": out}))
+        elif self.path in ("/", "/index.html"):
+            self.send(200, PAGE, "text/html; charset=utf-8")
+        else:
+            self.send(404, "{}")
+
+    def do_POST(self):
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+            d = json.loads(self.rfile.read(n) or b"{}")
+            if self.path == "/api/save":
+                msg = save(d)
+            elif self.path == "/api/play":
+                # plays the given URL (e.g. the station picked in the UI) without saving it
+                url = (d.get("url") or "").strip()
+                if url and not re.fullmatch(URL_RE, url):
+                    raise ValueError("stream URL must be a plain http(s):// address")
+                msg = run("/usr/local/bin/radio", "play", *([url] if url else []))[1]
+            elif self.path == "/api/vol":
+                v = int(d.get("volume"))
+                msg = run("/usr/local/bin/radio", "vol", str(max(0, min(100, v))))[1]
+            elif self.path == "/api/bulb":
+                msg = bulb(d)
+            elif self.path == "/api/bt/use":
+                msg = bt_use(d)
+            elif self.path.startswith("/api/") and self.path[5:] in ACTIONS:
+                msg = run(*ACTIONS[self.path[5:]])[1]
+            else:
+                return self.send(404, "{}")
+            self.send(200, json.dumps({"ok": True, "msg": msg, "status": status()}))
+        except (ValueError, TypeError, KeyError) as e:
+            self.send(400, json.dumps({"ok": False, "msg": str(e)}))
+
+
+PAGE = r"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alarm Radio</title>
+<style>
+:root{--bg:#f4f1ea;--card:#fffdf8;--ink:#1f1d1a;--mut:#6f6a60;--line:#e2ddd2;--acc:#c2410c;--ok:#15803d;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#171513;--card:#211e1b;--ink:#f1ece4;--mut:#a39d92;--line:#36312b;--acc:#fb923c;--ok:#4ade80;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif}
+main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:4px 0 2px}
+.sub{color:var(--mut);font-size:14px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+label.f{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
+input[type=time]{font-size:34px;font-weight:600;border:0;background:none;color:var(--ink);padding:0;width:100%}
+select,input[type=url]{width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.days{display:flex;gap:6px}
+.days label{flex:1}
+.days input{display:none}
+.days span{display:block;text-align:center;padding:8px 0;border:1px solid var(--line);border-radius:8px;font-size:14px;cursor:pointer;user-select:none}
+.days input:checked+span{background:var(--acc);border-color:var(--acc);color:#fff}
+.val{font-variant-numeric:tabular-nums;font-weight:600}
+.sw{position:relative;width:52px;height:30px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sw i{position:absolute;inset:0;background:var(--line);border-radius:30px;transition:.2s;cursor:pointer}
+.sw i:before{content:"";position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+i{background:var(--acc)}
+.sw input:checked+i:before{transform:translateX(22px)}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:11px 14px;cursor:pointer;flex:1}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff;width:100%;margin-top:16px}
+.btns{display:flex;gap:8px}
+.st{font-size:14px;color:var(--mut)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+#msg{min-height:20px;font-size:14px;margin-top:10px}
+.off{opacity:.45;pointer-events:none}
+.dev{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.dev:first-child{margin-top:12px}
+.dev div{flex:1;min-width:0}
+.dev b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dev button{flex:none;padding:8px 14px}
+</style></head><body><main>
+<h1>Alarm Radio</h1>
+<div class="sub" id="next">&nbsp;</div>
+
+<div class="card">
+  <div class="row"><strong>Alarm</strong><label class="sw"><input type="checkbox" id="enabled"><i></i></label></div>
+  <div id="alarmfields">
+    <label class="f">Time</label>
+    <input type="time" id="time" required>
+    <label class="f">Days</label>
+    <div class="days" id="days"></div>
+    <div id="wakebox">
+    <div class="row" style="margin-top:16px"><span>Wake-up light</span><label class="sw"><input type="checkbox" id="light"><i></i></label></div>
+    <div id="lightfields">
+      <label class="f">Final colour and brightness <span class="val" id="lbrv"></span></label>
+      <div class="row"><input type="color" id="light_color" style="width:64px;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:3px;flex:none">
+        <input type="range" id="light_bright" min="1" max="100"></div>
+      <div class="st" style="margin-top:8px">Fades in from dark together with the volume (fade-in time below).</div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <label class="f" style="margin-top:0">Station</label>
+  <select id="station"></select>
+  <label class="f">Stream URL</label>
+  <input type="url" id="url" placeholder="http://…">
+  <label class="f">Volume <span class="val" id="volv"></span></label>
+  <input type="range" id="volume" min="0" max="100">
+  <label class="f">Fade-in (volume ramp) <span class="val" id="fadev"></span></label>
+  <input type="range" id="fade" min="0" max="180" step="5">
+  <label class="f">Play for <span class="val" id="durv"></span></label>
+  <input type="range" id="duration" min="5" max="180" step="5">
+  <button class="pri" id="save">Save</button>
+  <div id="msg"></div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <span class="st" id="speaker"></span><span class="st" id="playing"></span>
+  </div>
+  <div class="btns">
+    <button data-a="play">▶ Play</button><button data-a="stop">■ Stop</button><button data-a="test">Test alarm</button>
+  </div>
+  <div id="livebox" style="display:none">
+    <label class="f">Live volume <span class="val" id="livev"></span></label>
+    <input type="range" id="live" min="0" max="100">
+  </div>
+</div>
+
+<div class="card" id="lightcard" style="display:none">
+  <div class="row"><strong>Light</strong><span class="st" id="bulbst">…</span></div>
+  <div class="btns" style="margin-top:12px">
+    <button id="bon">On</button><button id="boff">Off</button><button id="bwhite">White</button>
+    <input type="color" id="bcolor" value="#ff5000" style="flex:1;height:46px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:4px">
+  </div>
+  <label class="f">Brightness <span class="val" id="bbrv"></span></label>
+  <input type="range" id="bbright" min="1" max="100" value="100">
+</div>
+
+<div class="card">
+  <div class="row"><strong>Speaker</strong><span class="st" id="spkname"></span></div>
+  <button id="btscan" style="width:100%;margin-top:12px">Find Bluetooth speakers</button>
+  <div class="st" style="margin-top:8px">A new speaker must be in pairing mode (usually: hold its Bluetooth button until the light blinks fast). Already paired speakers switch over directly.</div>
+  <div id="btlist"></div>
+  <div id="btmsg" class="st" style="margin-top:8px"></div>
+</div>
+<div class="st" style="text-align:center" id="ver"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id), D=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+$("days").innerHTML=D.map(d=>`<label><input type="checkbox" value="${d}"><span>${d}</span></label>`).join("");
+const fmt={lbrv:()=>$("light_bright").value+" %",volv:()=>$("volume").value,fadev:()=>$("fade").value+" s",durv:()=>$("duration").value+" min",livev:()=>$("live").value};
+const upd=()=>{for(const k in fmt)$(k).textContent=fmt[k]();$("alarmfields").classList.toggle("off",!$("enabled").checked);$("lightfields").classList.toggle("off",!$("light").checked)};
+["volume","fade","duration","live","enabled","light","light_bright"].forEach(i=>$(i).addEventListener("input",upd));
+
+function stations(list,url){
+  const sel=$("station");
+  if(sel.options.length!==list.length+1)
+    sel.innerHTML=list.map(x=>`<option value="${x.url}">${x.name}</option>`).join("")+`<option value="">Other (enter URL)</option>`;
+  sel.value=list.some(x=>x.url===url)?url:"";
+}
+$("station").addEventListener("change",()=>{if($("station").value)$("url").value=$("station").value;else $("url").focus()});
+$("url").addEventListener("input",()=>stations([...$("station").options].filter(o=>o.value).map(o=>({name:o.text,url:o.value})),$("url").value.trim()));
+function show(s,form){
+  if(form){
+    stations(s.stations,s.url);
+    $("enabled").checked=s.enabled;$("time").value=s.time;$("url").value=s.url;
+    $("volume").value=s.volume;$("fade").value=s.fade;$("duration").value=s.duration;
+    document.querySelectorAll("#days input").forEach(c=>c.checked=s.days.includes(c.value));
+    $("light").checked=s.light;$("light_color").value="#"+s.light_color;$("light_bright").value=s.light_bright;
+  }
+  $("wakebox").style.display=s.bulb?"":"none";
+  $("lightcard").style.display=s.bulb?"":"none";
+  if(s.bulb&&!bulbLoaded){bulbLoaded=true;loadBulb()}
+  $("spkname").textContent=s.speaker||"none";
+  $("ver").textContent="Alarm Radio "+(s.version||"");
+  $("next").textContent=s.enabled&&s.next?"Next alarm: "+s.next:"Alarm is off";
+  $("speaker").innerHTML=`<span class="dot" style="background:var(--${s.connected?"ok":"bad"})"></span>${s.speaker} ${s.connected?"connected":"not connected"}`;
+  const st=(s.stations||[]).find(x=>x.url===s.now_url);
+  $("playing").textContent=s.playing?"Playing: "+(s.playing==="radio"?(st?st.name:"radio"):s.playing+(st?" · "+st.name:"")):"Idle";
+  $("livebox").style.display=s.playing?"":"none";
+  if(s.live_volume!=null&&document.activeElement!==$("live"))$("live").value=s.live_volume;
+  upd();
+}
+async function api(path,body){
+  const r=await fetch("/api/"+path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{});
+  return r.json();
+}
+async function refresh(form){try{show(await api("status"),form)}catch(e){}}
+function msg(t,ok){$("msg").textContent=t;$("msg").style.color=ok?"var(--ok)":"var(--bad)"}
+
+$("save").onclick=async()=>{
+  const body={enabled:$("enabled").checked,time:$("time").value,url:$("url").value.trim(),
+    volume:+$("volume").value,fade:+$("fade").value,duration:+$("duration").value,
+    light:$("light").checked,light_color:$("light_color").value.slice(1),light_bright:+$("light_bright").value,
+    days:[...document.querySelectorAll("#days input:checked")].map(c=>c.value)};
+  $("save").disabled=true;msg("Saving…",true);
+  try{const r=await api("save",body);msg(r.ok?"Saved.":r.msg,r.ok);if(r.ok)show(r.status,true)}
+  catch(e){msg("Could not reach the radio",false)}
+  $("save").disabled=false;
+};
+document.querySelectorAll("[data-a]").forEach(b=>b.onclick=async()=>{
+  b.disabled=true;
+  try{const r=await api(b.dataset.a,b.dataset.a==="play"?{url:$("url").value.trim()}:{});
+      if(r.ok===false)msg(r.msg,false);else show(r.status,false)}catch(e){}
+  b.disabled=false;
+});
+$("live").addEventListener("change",()=>api("vol",{volume:+$("live").value}));
+refresh(true);setInterval(()=>refresh(false),5000);
+
+// --- Light (Bluetooth bulb) ---
+let bmode="rgb", bulbLoaded=false;
+const bbr=()=>{$("bbrv").textContent=$("bbright").value+" %"};
+$("bbright").addEventListener("input",bbr);bbr();
+const hex=n=>n.toString(16).padStart(2,"0");
+async function bulb(body,label){
+  $("bulbst").textContent="…";
+  try{const r=await api("bulb",body);$("bulbst").textContent=r.ok?label:r.msg;$("bulbst").style.color=r.ok?"":"var(--bad)"}
+  catch(e){$("bulbst").textContent="no reply"}
+}
+const bsend=()=>bmode==="white"?bulb({action:"white",bright:+$("bbright").value},"White "+$("bbright").value+" %")
+  :bulb({action:"rgb",rgb:$("bcolor").value.slice(1),bright:+$("bbright").value},"Colour "+$("bbright").value+" %");
+$("bon").onclick=()=>bulb({action:"on"},"On");
+$("boff").onclick=()=>bulb({action:"off"},"Off");
+$("bwhite").onclick=()=>{bmode="white";bsend()};
+$("bcolor").addEventListener("change",()=>{bmode="rgb";bsend()});
+$("bbright").addEventListener("change",bsend);
+function loadBulb(){api("bulb").then(s=>{
+  if(s.error){$("bulbst").textContent="not reachable";return}
+  const sv=s.saved||{};bmode=sv.mode||"rgb";
+  if(sv.rgb)$("bcolor").value="#"+sv.rgb;
+  if(sv.bright)$("bbright").value=sv.bright;bbr();
+  $("bulbst").textContent=s.on?(s.w&&!(s.r||s.g||s.b)?"White":"#"+hex(s.r)+hex(s.g)+hex(s.b)):"Off";
+}).catch(()=>{$("bulbst").textContent="not reachable"})}
+
+// --- Speaker (Bluetooth) ---
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function btmsg(t,ok){$("btmsg").textContent=t;$("btmsg").style.color=ok===false?"var(--bad)":ok?"var(--ok)":""}
+$("btscan").onclick=async()=>{
+  $("btscan").disabled=true;$("btlist").innerHTML="";btmsg("Scanning for about 15 seconds…");
+  try{
+    const r=await api("bt/scan");
+    $("btlist").innerHTML=r.devices.map(d=>`<div class="dev"><div><b>${esc(d.name)}</b>
+      <span class="st">${d.current?"in use":d.paired?"paired":"new"}${d.rssi!=null?" · signal "+d.rssi+" dBm":""}</span></div>
+      ${d.current?"":`<button data-mac="${esc(d.mac)}" data-name="${esc(d.name)}">Use</button>`}</div>`).join("");
+    btmsg(r.devices.length?"":"No speakers found. Is it on and in pairing mode?",r.devices.length?null:false);
+    document.querySelectorAll("#btlist button").forEach(b=>b.onclick=()=>useSpeaker(b.dataset.mac,b.dataset.name));
+  }catch(e){btmsg("Scan failed",false)}
+  $("btscan").disabled=false;
+};
+async function useSpeaker(mac,name){
+  if(!confirm("Switch the radio to "+name+"?"))return;
+  document.querySelectorAll("#btlist button,#btscan").forEach(b=>b.disabled=true);
+  btmsg("Connecting to "+name+"… (up to a minute)");
+  try{const r=await api("bt/use",{mac});
+      if(r.ok){btmsg("Audio now goes to "+name,true);$("btlist").innerHTML="";bulbLoaded=false;show(r.status,true)}
+      else btmsg(r.msg,false)}
+  catch(e){btmsg("No reply from the radio",false)}
+  document.querySelectorAll("#btlist button,#btscan").forEach(b=>b.disabled=false);
+}
+</script></body></html>
+"""
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("", PORT), Handler).serve_forever()

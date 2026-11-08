@@ -1,0 +1,11 @@
+[Unit]
+Description=Alarm radio: web UI on port 80
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/radio-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,68 @@
+#!/bin/bash
+# bt-watchdog — keeps the speaker connected. Reconnects on drop; if that keeps
+# failing, restarts bluetooth + bluealsa (at most every 30 min), with backoff
+# so a speaker that's simply switched off doesn't hog the shared WiFi/BT radio.
+set -u
+. /etc/alarm-radio.conf
+
+fails=0
+last_restart=0
+state=""
+
+# Speaker bulb: after a power-up it reconnects to the Pi by itself within seconds — faster than the 15 s
+# poll below notices — so also listen for BlueZ "Connected: true" events and run the power-up check
+# (blue flash, light off) on every new connection. Runs inside this service; stops with it.
+if [ -n "${BULB_MAC:-}" ] && [ "$BULB_MAC" = "$SPEAKER_MAC" ]; then
+    (
+        dbus-monitor --system "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/bluez/hci0/dev_${BULB_MAC//:/_}'" 2>/dev/null |
+        while read -r line; do
+            case $line in
+                *'string "Connected"'*) next=1 ;;
+                *'boolean true'*)
+                    if [ "${next:-0}" = 1 ]; then
+                        echo "speaker connection event"
+                        ( sleep 2; timeout 60 /usr/local/bin/bulb connected || echo "bulb connected-check failed" ) &
+                    fi
+                    next=0 ;;
+                *'boolean false'*) next=0 ;;
+            esac
+        done
+    ) &
+fi
+while :; do
+    if [ -z "$SPEAKER_MAC" ]; then sleep 60; . /etc/alarm-radio.conf; continue; fi
+    rfkill list bluetooth | grep -q "Soft blocked: yes" && rfkill unblock bluetooth
+    bluetoothctl show | grep -q "Powered: yes" || bluetoothctl power on >/dev/null
+
+    if bluetoothctl info "$SPEAKER_MAC" 2>/dev/null | grep -q "Connected: yes"; then
+        if [ "$state" != up ]; then
+            echo "speaker connected"
+            # the speaker bulb powers up in full white: blue "connected" flash, then light off.
+            # Reconnects are handled by the event listener above; here only when the watchdog starts.
+            if [ -z "$state" ] && [ "${BULB_MAC:-}" = "$SPEAKER_MAC" ]; then
+                timeout 60 /usr/local/bin/bulb connected || echo "bulb connected-check failed"
+            fi
+        fi
+        state=up; fails=0
+        sleep 15; continue
+    fi
+
+    [ "$state" = up ] && echo "speaker disconnected"
+    state=down
+    if timeout 20 bluetoothctl connect "$SPEAKER_MAC" >/dev/null 2>&1; then
+        echo "reconnected after $fails failed attempt(s)"
+        fails=0; continue
+    fi
+    fails=$((fails + 1))
+
+    now=$(date +%s)
+    if [ $fails -ge 6 ] && [ $((now - last_restart)) -ge 1800 ]; then
+        echo "reconnect failed $fails times — restarting bluetooth and bluealsa"
+        systemctl restart bluetooth; sleep 5
+        rfkill unblock bluetooth >/dev/null 2>&1; bluetoothctl power on >/dev/null
+        systemctl restart bluealsa; sleep 5
+        last_restart=$now
+    fi
+    # backoff: 15 s for the first minutes, then once a minute
+    [ $fails -lt 8 ] && sleep 15 || sleep 60
+done

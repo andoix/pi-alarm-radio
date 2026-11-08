@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""bulb — control the RGB + white Bluetooth speaker bulb ("bt-speaker", Model-BL-05, TMSmartBulb app).
+
+  bulb on                      restore the last colour/white
+  bulb off
+  bulb restore                 put back the saved on/off + colour
+  bulb connected               bt-watchdog runs this on (re)connect: after a power-up, blue flash then off
+  bulb red|green|blue|orange|purple|pink|yellow|cyan|warm [BRIGHT%]
+  bulb rgb RRGGBB [BRIGHT%]    any colour, e.g. bulb rgb ff6000 50
+  bulb white [LEVEL%]          warm white mixed from RGB (the bulb's W LEDs are not used)
+  bulb set R G B W             raw channels 0-255
+  bulb sunrise MIN [RRGGBB] [BRIGHT%]   fade in from dark, red -> orange -> colour (alarm wake-up light)
+  bulb status                  read the bulb's current state (JSON)
+
+Protocol (reverse engineered 2026-11-08): classic Bluetooth SPP, RFCOMM channel 1, no pairing.
+  set:  01 fe 00 00 53 83 10 | 00 G B R 00 50 W 00 00    (0x50 must be exactly 0x50 or the frame is ignored)
+  read: 01 fe 00 00 51 82 10 00.. -> reply 01fe0000 41 82 1c | 00 G B R 00 50 W 00 00 | "Model-BL-05\0"
+Brightness = the channel values themselves; all zero = off. The bulb takes one controller at a time,
+so the TMSmartBulb app on a phone can block it.
+"""
+import fcntl
+import json
+import os
+import re
+import socket
+import sys
+import time
+
+CONF = "/etc/alarm-radio.conf"
+STATE = "/var/lib/alarm-radio/bulb.json"
+LOCK = "/run/alarm-radio/bulb.lock"
+STOP = "/run/alarm-radio/bulb.stop"        # ask a running sunrise to stop
+COLORS = {"red": "ff0000", "green": "00ff00", "blue": "0000ff", "orange": "ff5000", "yellow": "ffb000",
+          "purple": "8000ff", "pink": "ff2060", "cyan": "00ffff", "warm": "ff7020"}
+WHITE_MIX = "ffb060"        # warm-ish white made from R+G+B
+
+
+def mac():
+    """BULB_MAC from the environment (radio-pair uses this to probe a device) or the config."""
+    if re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", os.environ.get("BULB_MAC", "")):
+        return os.environ["BULB_MAC"]
+    m = None
+    try:
+        for line in open(CONF):
+            m = re.match(r"^BULB_MAC=\"?([0-9A-Fa-f:]{17})", line) or m
+    except OSError:
+        pass
+    if not m:
+        sys.exit("bulb: no light bulb configured (BULB_MAC is empty — pick a speaker bulb in the web UI)")
+    return m.group(1)
+
+
+def connect():
+    last = None
+    for attempt in range(3):
+        s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+        s.settimeout(15)
+        try:
+            s.connect((mac(), 1))
+            return s
+        except OSError as e:
+            last = e
+            s.close()
+            time.sleep(1)
+    sys.exit(f"bulb: cannot connect to {mac()}: {last} (is the TMSmartBulb app connected?)")
+
+
+def frame(r, g, b, w):
+    return bytes([0x01, 0xfe, 0, 0, 0x53, 0x83, 0x10, 0, g, b, r, 0, 0x50, w, 0, 0])
+
+
+def send(r, g, b, w):
+    s = connect()
+    try:
+        s.send(frame(r, g, b, w))
+        time.sleep(0.3)                     # let it go out before closing the link
+    finally:
+        s.close()
+
+
+def read():
+    s = connect()
+    try:
+        s.send(bytes.fromhex("01fe0000518210000000000000000000"))
+        s.settimeout(3)
+        d = b""
+        while len(d) < 16:
+            chunk = s.recv(64)
+            if not chunk:
+                break
+            d += chunk
+    finally:
+        s.close()
+    if len(d) < 16 or d[:7] != bytes.fromhex("01fe000041821c"):
+        sys.exit(f"bulb: unexpected reply {d.hex()}")
+    g, b, r, w = d[8], d[9], d[10], d[13]
+    return {"r": r, "g": g, "b": b, "w": w, "on": any((r, g, b, w)),
+            "model": d[16:].split(b"\0")[0].decode(errors="replace")}
+
+
+def load_state():
+    try:
+        return json.load(open(STATE))
+    except (OSError, ValueError):
+        return {"rgb": "ffffff", "w": 0, "bright": 100, "mode": "white"}
+
+
+def save_state(st):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w") as f:
+        json.dump(st, f)
+
+
+def pct(args, i, default):
+    if len(args) <= i:
+        return default
+    v = int(args[i].rstrip("%"))
+    if not 0 <= v <= 100:
+        raise ValueError("brightness must be 0-100")
+    return v
+
+
+def apply(st):
+    """Send a saved state {mode: rgb|white, rgb, bright, w}."""
+    # The bulb's own white LEDs are not used (cool colour, and dim since the bulb runs on 12 V DC):
+    # "white" is mixed from RGB (WHITE_MIX).
+    k = st["bright"] / 100
+    c = bytes.fromhex(WHITE_MIX if st["mode"] == "white" else st["rgb"])
+    send(*(round(x * k) for x in c), 0)
+
+
+def take_lock(lk):
+    """Exclusive bulb access. If a sunrise holds it, ask the sunrise to stop (STOP file) and wait."""
+    try:
+        fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        open(STOP, "w").close()
+        fcntl.flock(lk, fcntl.LOCK_EX)
+
+
+def sunrise(minutes, color, bright):
+    """Fade in from dark: red -> orange -> COLOR at BRIGHT% over MINUTES (the alarm's wake-up light,
+    started by radio-player with the volume fade). Keeps one connection open, a step every ~0.5 s.
+    Any other bulb command stops it (via the STOP file) and then takes over."""
+    # Colour (hue) and brightness are separate: the hue moves red -> orange -> COLOR, while the brightness
+    # rises from black along a gamma curve (eyes are logarithmic: linear 4 -> 255 looks bright almost at once).
+    k = bright / 100
+    hues = [(0.0, (255, 0, 0)), (0.45, (255, 45, 0)), (0.8, (255, 110, 20)), (1.0, tuple(bytes.fromhex(color)))]
+    dur = max(5.0, minutes * 60)
+    step = max(0.5, dur / 400)
+    print(f"sunrise: {dur:.0f} s to #{color} {bright}%", flush=True)
+    with open(LOCK, "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            os.unlink(STOP)
+        except OSError:
+            pass
+        s, last, t0 = None, None, time.time()
+        while True:
+            f = min(1.0, (time.time() - t0) / dur)
+            for (fa, ca), (fb, cb) in zip(hues, hues[1:]):
+                if f <= fb:
+                    u = (f - fa) / (fb - fa)
+                    hue = [x + (y - x) * u for x, y in zip(ca, cb)]
+                    break
+            level = k * f ** 2.2
+            rgb = tuple(round(x * level) for x in hue)
+            if os.path.exists(STOP):
+                print("sunrise: stopped by another bulb command", flush=True)
+                break
+            if rgb != last:
+                try:
+                    if s is None:
+                        s = connect()
+                    s.send(frame(*rgb, 0))
+                    last = rgb
+                except (OSError, SystemExit) as e:
+                    print(f"sunrise: {e}", flush=True)
+                    if s:
+                        s.close()
+                    s = None
+            if f >= 1.0:
+                save_state({**load_state(), "mode": "rgb", "rgb": color, "bright": bright, "on": True})
+                print("sunrise: done", flush=True)
+                break
+            time.sleep(step)
+        if s:
+            time.sleep(0.3)
+            s.close()
+
+
+def main(a):
+    cmd = (a[0] if a else "status").lower()
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    if cmd == "status":
+        with open(LOCK, "w") as lk:
+            try:
+                fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:             # a sunrise is running: don't interrupt it just to look
+                print(json.dumps({"busy": True, "on": True, "saved": load_state()}))
+                return
+            print(json.dumps({**read(), "saved": load_state()}))
+        return
+    if cmd == "sunrise":                          # bulb sunrise MINUTES [RRGGBB] [BRIGHT%]
+        color = (a[2] if len(a) > 2 else WHITE_MIX).lstrip("#").lower()
+        if not re.fullmatch(r"[0-9a-f]{6}", color):
+            raise ValueError("colour must be RRGGBB")
+        sunrise(float(a[1]), color, pct(a, 3, 100))
+        return
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, "w") as lk:
+        take_lock(lk)                         # one Bluetooth connection at a time
+        st = load_state()
+        if cmd == "connected":
+            # Run by bt-watchdog whenever the speaker (re)connects. The bulb powers up in full W (white LEDs),
+            # which this software never uses — so W > 0 means "just powered on": flash blue twice, then off.
+            # A plain Bluetooth reconnect (W == 0) leaves the light as it is.
+            if read()["w"] == 0:
+                print("bulb reconnected, light unchanged")
+                return
+            s = connect()
+            try:
+                for _ in range(2):
+                    s.send(frame(0, 0, 255, 0)); time.sleep(0.6)
+                    s.send(frame(0, 0, 0, 0)); time.sleep(0.4)
+            finally:
+                time.sleep(0.2)
+                s.close()
+            st["on"] = False
+            save_state(st)
+            print("bulb powered up: blue flash, light off")
+            return
+        if cmd == "off" or (cmd == "restore" and st.get("on") is False):
+            send(0, 0, 0, 0)
+            st["on"] = False
+            save_state(st)
+            print("bulb off")
+            return
+        if cmd in ("on", "restore"):     # restore: put back the saved state, e.g. after a power cut
+            pass
+        elif cmd == "white":
+            st.update(mode="white", bright=pct(a, 1, 100))
+        elif cmd in COLORS or cmd == "rgb":
+            hexc = COLORS.get(cmd) or (a[1] if len(a) > 1 else "")
+            if not re.fullmatch(r"#?[0-9A-Fa-f]{6}", hexc):
+                raise ValueError("colour must be RRGGBB")
+            st.update(mode="rgb", rgb=hexc.lstrip("#").lower(), bright=pct(a, 1 if cmd in COLORS else 2, 100))
+        elif cmd == "set":
+            r, g, b, w = (int(x) for x in a[1:5])
+            if not all(0 <= x <= 255 for x in (r, g, b, w)):
+                raise ValueError("channels must be 0-255")
+            send(r, g, b, w)
+            print(f"bulb R{r} G{g} B{b} W{w}")
+            return
+        else:
+            print(__doc__.split("\n\n")[1])
+            sys.exit(2)
+        apply(st)
+        st["on"] = True
+        save_state(st)
+        print(f"bulb {st['mode']} " + (f"#{st['rgb']} " if st["mode"] == "rgb" else "") + f"{st['bright']}%")
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except (ValueError, IndexError) as e:
+        sys.exit(f"bulb: {e}")

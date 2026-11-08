@@ -1,0 +1,45 @@
+#!/bin/bash
+# radio-apply — (re)create the alarm timer from /etc/alarm-radio.conf.
+# The timer is transient (systemd-run): changing it needs no daemon-reload, which
+# takes ~20-40 s on a Pi Zero. Transient timers vanish on reboot, so
+# radio-schedule.service runs this at boot. Keep-alive/watchdog are only
+# restarted (and the tone file only rebuilt) when their settings changed.
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+set -eu
+. /etc/alarm-radio.conf
+exec 9>/run/radio-apply.lock; flock 9          # one apply at a time
+
+case ${ALARM_DAYS:-*} in
+    "*") spec="*-*-* $ALARM_TIME:00 $TIMEZONE" ;;     # every day
+    *)   spec="$ALARM_DAYS *-*-* $ALARM_TIME:00 $TIMEZONE" ;;
+esac
+if ! systemd-analyze calendar "$spec" >/dev/null 2>&1; then
+    echo "invalid schedule: ALARM_DAYS='$ALARM_DAYS' ALARM_TIME='$ALARM_TIME' TIMEZONE='$TIMEZONE'" >&2
+    exit 1
+fi
+
+systemctl stop radio-alarm.timer 2>/dev/null || true
+if [ "$ALARM_ENABLED" = yes ]; then
+    systemd-run --quiet --unit=radio-alarm --on-calendar="$spec" \
+        --timer-property=AccuracySec=1s --description="Alarm radio wake-up ($spec)"
+    echo "alarm: $spec"
+    echo "next:  $(systemctl show radio-alarm.timer -p NextElapseUSecRealtime --value)"
+else
+    echo "alarm disabled"
+fi
+
+# The wake-up light is started by radio-player together with the volume fade (no timer of its own).
+systemctl stop radio-light.timer 2>/dev/null || true      # leftover from the old lead-time version
+
+# keep-alive tone + services: only when the relevant settings changed
+STAMP=/var/lib/alarm-radio/applied
+TONE=/usr/local/share/alarm-radio/keepalive.wav
+want="$KEEPALIVE_ENABLED $KEEPALIVE_FREQ $KEEPALIVE_GAIN $SPEAKER_MAC"
+if [ "$(cat $STAMP 2>/dev/null)" != "$want" ] || [ ! -f $TONE ]; then
+    mkdir -p "$(dirname $TONE)" "$(dirname $STAMP)"
+    # 10 s loop (whole number of cycles for integer Hz, so it loops seamlessly)
+    sox -n -r 44100 -c 2 -b 16 $TONE synth 10 sine "$KEEPALIVE_FREQ" gain "$KEEPALIVE_GAIN"
+    systemctl restart radio-keepalive.service bt-watchdog.service
+    echo "$want" > $STAMP
+    echo "keep-alive/speaker settings applied"
+fi

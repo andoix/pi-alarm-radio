@@ -1,0 +1,158 @@
+# Pi Alarm Radio
+
+An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with Bluetooth) that plays through a
+**Bluetooth speaker**. Everything is set up in a phone-friendly web page. No app and no cloud are needed.
+
+- **Alarm:** time, weekdays, station, volume, fade-in, how long it plays. If the internet is down, it plays a local chime instead.
+- **Radio:** a station picker (Estonian stations included, editable) or any http(s) MP3/AAC stream URL. Play, Stop and live volume.
+- **Any Bluetooth speaker:** find, pair and switch speakers from the web UI.
+- **RGB speaker bulbs:** if the speaker is one of the cheap RGB "bt-speaker" bulbs (phone app *TMSmartBulb*), you also get light
+  controls and a **wake-up light** that fades in from dark → red → orange → your colour together with the alarm volume.
+- **Reliable:** starts at boot, reconnects the speaker on its own, keeps speakers from auto-powering-off,
+  and keeps a persistent log so you can see what happened after an unexpected reboot.
+
+## Install
+
+### Option A: flash the ready-made image (easiest)
+
+1. Download `pi-alarm-radio-<version>.img.xz` from the GitHub **Releases** page.
+2. In **Raspberry Pi Imager**, choose *Use custom* and pick the file. In the customisation settings, set the **WiFi** network and
+   password, the **user name** and password, the time zone, and enable SSH if you want it.
+3. Boot the Pi, then open **http://alarmradio.local/** (or the Pi's IP address, which your router shows).
+
+### Option B: install on Raspberry Pi OS Lite
+
+Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (the Pi Zero W needs 32-bit). Set the hostname to `alarmradio` and set up
+WiFi, user and SSH. Then, from a computer with this repository:
+
+```sh
+ssh-copy-id <user>@alarmradio.local     # optional, saves typing the password
+./install.sh <user>@alarmradio.local
+```
+
+Or directly on the Pi:
+
+```sh
+git clone https://github.com/andoix/pi-alarm-radio && cd pi-alarm-radio && sudo ./pi-setup.sh
+```
+
+The installer is safe to re-run (that's also how you update). An existing `/etc/alarm-radio.conf` is kept,
+unless you pass `FORCE_CONF=1`.
+
+## First setup
+
+1. Open **http://alarmradio.local/**.
+2. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
+   **Find Bluetooth speakers**, then press **Use** next to it. Speakers that are already paired switch over without pairing mode.
+3. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
+
+The speaker can only play from one source at a time, so disconnect phones from it.
+
+## Command line (on the Pi)
+
+```sh
+radio play [URL] | stop | status | vol N | test-alarm | log [N]
+sudo radio-pair AA:BB:CC:DD:EE:FF        # switch speaker (same as Use in the web UI)
+bulb on | off | red | orange | ... [BRIGHT%] | rgb RRGGBB [%] | white [%] | status   # speaker bulbs only
+```
+
+## Settings
+
+Change settings in the web UI, or edit `/etc/alarm-radio.conf` and run `sudo radio-apply`.
+
+- `ALARM_DAYS`: `Mon..Fri`, `Sat,Sun`, `Mon,Wed,Fri`, or `"*"` for every day. `TIMEZONE` defaults to `Europe/Tallinn`.
+- `VOLUME` is mpv's volume, which is perceptual (cubic): 50 ≈ 12 % amplitude. `radio vol N` changes the live volume.
+- `FADE_SEC` is the volume fade-in. The wake-up light fades in over the same time.
+- `KEEPALIVE_*`: an inaudible 20 Hz tone while idle, so speakers don't power off after ~20 min of silence.
+- **Stations:** `/etc/alarm-radio-stations.txt` holds one `Name|URL` per line. Avoid URLs that contain expiring tokens.
+
+## RGB speaker bulbs
+
+Tested with a bulb that advertises itself as **"bt-speaker"** and reports **Model-BL-05** (phone app *TMSmartBulb*). It's a classic Bluetooth
+A2DP speaker, plus a serial port (SPP, RFCOMM channel 1) for the light. The light protocol doesn't need pairing:
+
+    set:  01 fe 00 00 53 83 10 | 00 G B R 00 50 W 00 00     (0x50 must stay exactly 0x50, or the frame is ignored)
+    read: 01 fe 00 00 51 82 10 + 9 × 00   ->   01fe0000 41 82 1c | 00 G B R 00 50 W 00 00 | "Model-BL-05\0"
+
+Brightness is set by the channel values, and all zeros turns it off. The bulb doesn't acknowledge writes.
+When you pick a speaker, `radio-pair` checks for the bulb protocol and sets `BULB_MAC`, which shows the light controls.
+
+- **White** is mixed from RGB (`WHITE_MIX` in `bulb`), and the separate W LEDs aren't used.
+- **Power-up:** the bulb starts in full W (its factory default). `bt-watchdog` notices the new connection, flashes the bulb
+  blue twice and turns it off.
+- **Wake-up light** (web UI → Alarm): when the alarm sound starts, `radio-player` runs `bulb sunrise`. The hue goes red → orange →
+  `LIGHT_COLOR`, and the brightness rises along a gamma curve to `LIGHT_BRIGHT`. Any other light command, or `radio stop`, ends it.
+- The bulb accepts one controller at a time, so close the TMSmartBulb phone app.
+- **Coil whine:** the bulb's built-in mains supply may whine audibly. The original bulb was converted to run on **12 V DC** at the
+  board's 2-pin input (the board makes its own 5 V for the Bluetooth module and amplifier). On 12 V the W LEDs are very dim, and the RGB
+  LEDs are fine. **This involves opening a mains-powered device: unplug it first, and treat the board as live at mains voltage.**
+  Never power a speaker or amplifier from the Pi's 5 V, because the Pi browns out and reboots.
+
+## How it works
+
+| Piece | What it does |
+|---|---|
+| `/etc/alarm-radio.conf` | All settings. |
+| `radio-apply` | Creates the alarm timer as a **transient** systemd timer (`systemd-run`) in about 1 s. Rewriting a unit file needs a daemon-reload, which takes 20–40 s on a Pi Zero. `radio-schedule.service` recreates the timer at boot. |
+| `radio-mpv.service` | **One permanent mpv** that holds the speaker. The output is fixed at 44.1 kHz/16-bit, so the Bluetooth device is never reopened. It's controlled over `/run/alarm-radio/mpv.sock` and switches sources in about 1.5 s. |
+| `radio-player` | Loads the stream with volume and fade-in, and watches it. If the stream doesn't start, it loops the fallback chime for 2 min, then tries the stream again. It also starts the wake-up light. |
+| `radio-keepalive.service` | While idle, loops the keep-alive tone in mpv. |
+| `bt-watchdog.service` | Keeps the adapter powered and the speaker connected. After repeated failures it restarts bluetooth and bluealsa. It also listens for connect events (the bulb power-up check). |
+| `radio-pair` | Pairs, trusts and connects a speaker, saves it, switches audio to it, and detects speaker bulbs. |
+| `bulb` | Light control for speaker bulbs (Python standard library). |
+| `radio-web.service` | The web UI on port 80 (Python standard library). There's **no login**, so only use it on a home network you trust. |
+| journald | Persistent but small (16 MB, 1 month, synced once a minute), so the previous boot's log survives (`journalctl -b -1`). |
+| WiFi / BlueZ | WiFi power saving is off (WiFi and Bluetooth share one chip). BlueZ always bonds when pairing. |
+
+Audio path: mpv → ALSA → bluez-alsa (`bluealsa`, A2DP) → speaker. There's no PulseAudio or PipeWire.
+
+## Troubleshooting
+
+```sh
+radio status                       # services, speaker, WiFi power save, next alarm
+radio log 100                      # recent log of all radio services
+journalctl -u bluetooth -u bluealsa -n 50
+systemctl list-timers radio-alarm.timer
+```
+
+- **`alarmradio.local` doesn't resolve:** mDNS can be flaky. Use the Pi's IP address instead.
+- **Speaker won't connect (`avdtp ... Permission denied`):** the pairing is lost. Put the speaker in pairing mode, remove it with
+  `bluetoothctl remove <MAC>`, and pick it again in the web UI.
+- **The Pi reboots by itself:** check the power. Use a good 5 V ≥ 2 A supply and don't charge anything from the Pi.
+  `vcgencmd get_throttled` other than `0x0` means undervoltage. `journalctl -b -1 -n 80` shows the end of the previous boot. If the log just
+  stops, the power was lost.
+- **No sound at all:** `sudo systemctl restart radio-mpv radio-keepalive`. Also check the speaker's own volume and whether a phone is connected to it.
+- **Stuttering:** WiFi/Bluetooth interference. Check that `radio status` shows `power save off`, and move the Pi closer to the speaker.
+- **Alarm didn't fire:** `systemctl list-timers radio-alarm.timer` (if it's missing, run `sudo radio-apply`). Check `timedatectl`: is the clock synced and the time zone right?
+- **Fallback chime instead of radio:** the stream URL can't be reached. Test it with `curl -I <url>` on the Pi.
+
+## Building the OS image
+
+`image/` contains a [pi-gen](https://github.com/RPi-Distro/pi-gen) stage that installs the radio on top of Raspberry Pi OS Lite
+(32-bit). GitHub Actions (`.github/workflows/image.yml`) builds it when a version tag `v*` is pushed and attaches the
+`.img.xz` to the release. See `image/README.md`.
+
+## Releasing a version
+
+1. Update `VERSION` and `CHANGELOG.md`.
+2. `git tag v$(cat VERSION) && git push --tags`. The workflow builds the image and creates the GitHub release.
+
+## Files
+
+```
+install.sh                 copy to a Pi over SSH and install
+pi-setup.sh                the installer (runs on the Pi as root; IMAGE_BUILD=1 inside the image build)
+VERSION, CHANGELOG.md
+bin/radio                  the `radio` command
+bin/radio-player           plays the stream/alarm with fade-in and fallback; starts the wake-up light
+bin/radio-apply            config → transient alarm timer
+bin/radio-keepalive        keep-alive tone
+bin/radio-lib.sh           shared helpers (mpv IPC)
+bin/bt-watchdog            Bluetooth reconnect watchdog + speaker bulb power-up check
+bin/radio-pair             pair/switch the speaker, detect speaker bulbs
+bin/bulb                   speaker bulb light control
+bin/radio-web              web UI
+systemd/*.service          units
+etc/                       config template, station list, ALSA, journald and NetworkManager snippets
+image/                     pi-gen stage for the OS image
+```

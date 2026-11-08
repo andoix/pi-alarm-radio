@@ -1,0 +1,59 @@
+name: Build OS image
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Put the radio into the pi-gen stage
+        run: |
+          mkdir -p image/stage-alarmradio/00-install/files/alarm-radio
+          cp -r bin systemd etc pi-setup.sh VERSION image/stage-alarmradio/00-install/files/alarm-radio/
+          echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: Build image (Raspberry Pi OS Lite 32-bit + alarm radio)
+        id: build
+        uses: usimd/pi-gen-action@v1
+        with:
+          image-name: pi-alarm-radio-${{ env.VERSION }}
+          pi-gen-version: master            # 32-bit (armhf): runs on the Pi Zero W too
+          release: trixie
+          stage-list: stage0 stage1 stage2 ./image/stage-alarmradio
+          hostname: alarmradio
+          timezone: Europe/Tallinn
+          locale: en_GB.UTF-8
+          keyboard-keymap: us
+          keyboard-layout: English (US)
+          wpa-country: EE
+          password: ""                      # no default password: set the user in Raspberry Pi Imager
+          enable-ssh: 0
+          compression: xz
+          verbose-output: true
+
+      - name: Release notes from CHANGELOG.md
+        run: awk -v v="$VERSION" '$0 ~ "^## " {p = index($0, v) > 0; next} p' CHANGELOG.md > release-notes.md
+
+      - name: Attach image to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: ${{ steps.build.outputs.image-path }}
+
+      - name: Keep image as a workflow artifact (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-alarm-radio-${{ env.VERSION }}
+          path: ${{ steps.build.outputs.image-path }}
+          retention-days: 14

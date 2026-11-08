@@ -1,0 +1,66 @@
+#!/bin/bash
+# radio — control the alarm radio.
+#   radio play [URL]      play the saved station, or URL (not saved), until "radio stop"
+#   radio stop            stop whatever is playing (manual or alarm)
+#   radio status          what's playing, speaker, next alarm
+#   radio vol N           set volume 0-100 (live, and default for "radio play")
+#   radio test-alarm      run the alarm now for TEST_DURATION_MIN minutes
+#   radio log             recent log of all radio services
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+set -u
+. /usr/local/bin/radio-lib.sh
+STATE=/var/lib/alarm-radio
+PLAYERS="radio-play.service radio-alarm.service radio-test.service"
+
+case ${1:-status} in
+    play)
+        url=${2:-$STREAM_URL}
+        [[ $url =~ ^https?://[^[:space:]\"\'\\\`\$]+$ ]] || { echo "not a plain http(s) URL: $url"; exit 2; }
+        mkdir -p "$RUN"; echo "$url" > "$RUN/play-url"     # read by radio-player play
+        systemctl stop radio-alarm.service radio-test.service 2>/dev/null
+        systemctl restart radio-play.service
+        echo "playing $url" ;;
+    stop)
+        systemctl stop $PLAYERS radio-light.service 2>/dev/null   # also a running wake-up light fade
+        echo "stopped" ;;
+    vol|volume)
+        n=${2:-}
+        [[ $n =~ ^[0-9]+$ ]] && [ "$n" -le 100 ] || { echo "usage: radio vol 0-100"; exit 2; }
+        mkdir -p "$STATE"; echo "$n" > "$STATE/volume"
+        if player_active && mpv_cmd "[\"set_property\",\"volume\",$n]" | grep -q success; then
+            echo "volume $n (live)"
+        else
+            echo "volume $n (used by next 'radio play'; alarm uses VOLUME=$VOLUME from config)"
+        fi ;;
+    test-alarm|test)
+        systemctl stop radio-play.service
+        systemctl restart radio-test.service
+        echo "test alarm started: ${TEST_DURATION_MIN} min, fade ${FADE_SEC}s to volume $VOLUME" ;;
+    status)
+        for u in $PLAYERS radio-mpv.service radio-keepalive.service bt-watchdog.service bluealsa.service bluetooth.service; do
+            printf '%-24s %s\n' "${u%.service}" "$(systemctl is-active $u)"
+        done
+        path=$(mpv_path)
+        if player_active && [ -n "$path" ]; then
+            v=$(mpv_get volume); echo "playing:  ${path##*/} at volume ${v%.*}"
+        else
+            echo "keep-alive tone: $([ "$path" = "$TONE" ] && echo on || echo off)"
+        fi
+        if [ -n "$SPEAKER_MAC" ] && bluetoothctl info "$SPEAKER_MAC" 2>/dev/null | grep -q "Connected: yes"; then
+            echo "speaker:  $SPEAKER_NAME ($SPEAKER_MAC) connected"
+        else
+            echo "speaker:  $SPEAKER_NAME (${SPEAKER_MAC:-not paired}) NOT connected"
+        fi
+        echo "wifi:     power save $(iw dev wlan0 get power_save 2>/dev/null | awk '{print $NF}')"
+        if [ "$ALARM_ENABLED" = yes ]; then
+            echo "alarm:    $ALARM_DAYS $ALARM_TIME, ${DURATION_MIN} min, volume $VOLUME"
+            echo "next:     $(systemctl show radio-alarm.timer -p NextElapseUSecRealtime --value)"
+        else
+            echo "alarm:    disabled"
+        fi ;;
+    log|logs)
+        journalctl -u radio-play -u radio-alarm -u radio-test -u radio-keepalive -u bt-watchdog -u radio-mpv \
+            -n "${2:-40}" --no-pager ;;
+    *)
+        sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

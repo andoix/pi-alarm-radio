@@ -1,0 +1,23 @@
+#!/bin/bash
+# radio-keepalive — while no radio is playing, loop an inaudible low tone
+# (keepalive.wav, made by radio-apply) in mpv so the JBL doesn't auto-power-off.
+set -u
+. /usr/local/bin/radio-lib.sh
+
+state=""; force=1
+say() { [ "$state" != "$1" ] && echo "$2"; state=$1; }
+while :; do
+    if player_active; then
+        say paused "keep-alive paused for playback"
+    elif [ "$KEEPALIVE_ENABLED" != yes ]; then
+        [ "$(mpv_path)" = "$TONE" ] && mpv_cmd '["stop"]' >/dev/null
+        say off "keep-alive disabled in config"
+    elif ! pcm_ready; then
+        say nospk "keep-alive waiting for speaker"
+        force=1
+    elif [ $force = 1 ] || [ "$(mpv_path)" != "$TONE" ] || ! mpv_playing; then
+        mpv_load "$TONE" 100 0 '"loop-file":"inf"' && {
+            say on "keep-alive tone on (${KEEPALIVE_FREQ} Hz, ${KEEPALIVE_GAIN} dBFS)"; force=0; }
+    fi
+    sleep 3
+done

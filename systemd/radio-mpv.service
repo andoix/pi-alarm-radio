@@ -1,0 +1,20 @@
+[Unit]
+Description=Alarm radio: mpv audio engine (plays whatever the radio scripts load into it)
+After=bluealsa.service network-online.target
+Wants=bluealsa.service network-online.target
+
+[Service]
+RuntimeDirectory=alarm-radio
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/mpv --no-config --idle=yes --really-quiet --no-video \
+    --load-scripts=no --ytdl=no --osc=no --input-default-bindings=no --input-terminal=no \
+    --ao=alsa --audio-device=alsa/bluealsa --audio-samplerate=44100 --audio-format=s16 \
+    --audio-channels=stereo --gapless-audio=yes --audio-buffer=1 \
+    --cache=yes --cache-secs=60 --demuxer-max-bytes=8MiB --cache-pause-wait=3 \
+    --network-timeout=20 --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=20 \
+    --input-ipc-server=/run/alarm-radio/mpv.sock
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

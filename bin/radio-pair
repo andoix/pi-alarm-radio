@@ -1,0 +1,69 @@
+#!/bin/bash
+# radio-pair — make a Bluetooth speaker the radio's speaker: pair (if needed), trust, connect,
+# store it in the config, switch audio to it. Also used by the web UI ("Speaker" → Use).
+#   radio-pair            scan for SPEAKER_NAME (put the speaker in pairing mode first)
+#   radio-pair AA:BB:..   use this device; an already paired one needs no pairing mode
+# If the device is an RGB speaker bulb ("bt-speaker", answers the bulb protocol), BULB_MAC is set too,
+# which turns on the Light controls and the wake-up light; otherwise BULB_MAC is cleared.
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+set -u
+CONF=/etc/alarm-radio.conf
+. $CONF
+
+setconf() {   # setconf KEY VALUE — replace the line, or append it if missing
+    if grep -q "^$1=" $CONF; then sed -i "s|^$1=[^#]*|$1=$2          |" $CONF; else echo "$1=$2" >> $CONF; fi
+}
+
+rfkill unblock bluetooth
+bluetoothctl power on >/dev/null
+bluetoothctl pairable on >/dev/null      # without this BlueZ pairs without bonding (no stored key)
+mac=${1:-}
+if [ -z "$mac" ]; then
+    echo "scanning 25 s for \"$SPEAKER_NAME\"..."
+    bluetoothctl --timeout 25 scan on >/dev/null
+    mac=$(bluetoothctl devices | grep -i -- "$SPEAKER_NAME" | head -1 | awk '{print $2}')
+    [ -n "$mac" ] || { echo "not found. Devices seen:"; bluetoothctl devices; exit 1; }
+fi
+[[ $mac =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] || { echo "not a Bluetooth address: $mac"; exit 2; }
+mac=${mac^^}
+echo "speaker: $mac"
+
+if bluetoothctl info "$mac" 2>/dev/null | grep -q "Bonded: yes"; then
+    echo "already paired"
+else
+    bluetoothctl remove "$mac" >/dev/null 2>&1    # forget any stale/half pairing first
+    bluetoothctl --timeout 12 scan on >/dev/null  # (re)discover it
+    bluetoothctl --agent NoInputNoOutput pair "$mac" | grep -E "successful|Failed|not available" || true
+fi
+bluetoothctl trust "$mac" >/dev/null
+for _ in 1 2 3; do
+    timeout 20 bluetoothctl connect "$mac" | grep -q "successful" && break
+    sleep 3
+done
+info=$(bluetoothctl info "$mac")
+echo "$info" | grep -q "Connected: yes" || { echo "!! could not connect — is it on, and in pairing mode if new?"; exit 1; }
+echo "$info" | grep -q "Bonded: yes" || echo "!! WARNING: not bonded — the speaker may forget this pairing"
+# only now (the new one works) release the old speaker, so it doesn't keep or grab back the connection
+old=${SPEAKER_MAC:-}
+if [ -n "$old" ] && [ "$old" != "$mac" ]; then
+    bluetoothctl untrust "$old" >/dev/null 2>&1
+    bluetoothctl disconnect "$old" >/dev/null 2>&1
+    echo "released old speaker $old"
+fi
+name=$(echo "$info" | sed -n 's/^\s*Alias: //p' | tr -d '"|\\$`#&')
+
+# RGB speaker bulb? (offers a serial port and answers the bulb's status request)
+bulb=""
+if echo "$info" | grep -q "Serial Port" && BULB_MAC=$mac timeout 40 /usr/local/bin/bulb status 2>/dev/null | grep -q '"model"'; then
+    bulb=$mac
+    echo "this speaker is an RGB light bulb — light controls enabled"
+fi
+
+setconf SPEAKER_MAC "$mac"
+setconf SPEAKER_NAME "\"$name\""
+setconf BULB_MAC "$bulb"
+sed -i "s/^defaults.bluealsa.device .*/defaults.bluealsa.device \"$mac\"/" /etc/asound.conf
+echo "saved: $name ($mac)"
+systemctl restart radio-mpv.service       # the audio engine opens the speaker once, at start
+/usr/local/bin/radio-apply >/dev/null     # keep-alive tone + watchdog follow SPEAKER_MAC
+echo "audio now goes to $name"

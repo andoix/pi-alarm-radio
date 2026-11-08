@@ -1,0 +1,9 @@
+[Unit]
+Description=Alarm radio: manual playback
+After=radio-mpv.service network-online.target
+Wants=radio-mpv.service network-online.target
+Conflicts=radio-alarm.service radio-test.service
+
+[Service]
+ExecStart=/usr/local/bin/radio-player play
+TimeoutStopSec=10

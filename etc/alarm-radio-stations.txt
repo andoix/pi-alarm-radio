@@ -1,0 +1,22 @@
+# Stations shown in the web UI picker. One per line: Name|URL   (lines starting with # are ignored)
+# All tested from the Pi on 2026-10-28. Any http(s) MP3/AAC stream works.
+Vikerraadio (ERR)|http://icecast.err.ee/vikerraadio.mp3
+Raadio 2 (ERR)|http://icecast.err.ee/raadio2.mp3
+Klassikaraadio (ERR)|http://icecast.err.ee/klassikaraadio.mp3
+Raadio 4 (ERR)|http://icecast.err.ee/raadio4.mp3
+Raadio Tallinn (ERR)|http://icecast.err.ee/raadiotallinn.mp3
+Klara Jazz (ERR)|http://icecast.err.ee/klarajazz.mp3
+Klara Nostalgia (ERR)|http://icecast.err.ee/klaranostalgia.mp3
+Sky Plus|https://stream.skymedia.ee/live/SKYPLUS
+Retro FM|https://stream.skymedia.ee/live/RETRO
+Kiss FM|https://stream.skymedia.ee/live/KISS
+Sky Radio|https://stream.skymedia.ee/live/SKY
+Legendaarne Raadio|https://stream.skymedia.ee/live/Legendaarne
+NRJ|https://edge03.cdn.bitflip.ee:8888/NRJ
+Rock FM|https://edge02.cdn.bitflip.ee:8888/rck
+Star FM|https://ice.leviracloud.eu/star320-mp3
+Power Hit Radio|https://ice.leviracloud.eu/phr96-aac
+Relax FM|https://stream.relaxfm.ee/relax
+Pereraadio|http://icecast.pereraadio.ee:8000/Tallinn
+Äripäeva Raadio|https://www.aripaev.ee/raadio/stream.mp3
+Tre Raadio Ring FM|https://cdn.treraadio.ee/ringfm

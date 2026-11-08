@@ -1,0 +1,12 @@
+[Unit]
+Description=Alarm radio: inaudible keep-alive tone for the speaker (via radio-mpv)
+After=radio-mpv.service
+Wants=radio-mpv.service
+
+[Service]
+ExecStart=/usr/local/bin/radio-keepalive
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,102 @@
+#!/bin/bash
+# radio-player alarm|test|play — tells the mpv daemon what to play and watches it.
+# Started by systemd (radio-alarm / radio-test / radio-play services), not by hand.
+set -u
+. /usr/local/bin/radio-lib.sh
+STATE=/var/lib/alarm-radio
+mkdir -p "$RUN" "$STATE"
+
+log() { echo "$*"; }
+nap() { sleep "$1" & wait $!; }         # interruptible, so "radio stop" acts at once
+now() { date +%s; }
+
+# While this runs the keep-alive leaves mpv alone; on exit, stop playback
+# (the keep-alive then puts its tone back within a few seconds).
+echo $$ > "$RUN/player.pid"
+trap 'mpv_cmd "[\"stop\"]" >/dev/null; rm -f "$RUN/player.pid"' EXIT
+trap 'exit 0' TERM INT
+
+# Make sure the speaker is connected before we start (watchdog also does this).
+ensure_bt() {
+    for _ in 1 2 3; do
+        speaker_connected && return 0
+        log "speaker not connected, connecting..."
+        timeout 15 bluetoothctl connect "$SPEAKER_MAC" >/dev/null 2>&1
+        nap 3
+    done
+    return 1
+}
+
+# start <src> <volume> <fade> [extra options] — load, wait until audio actually plays.
+start() {
+    mpv_load "$@" || return 1
+    for _ in $(seq 40); do              # up to 20 s
+        nap 0.5
+        [ "$(mpv_get idle-active)" = true ] && return 1
+        t=$(mpv_get time-pos)
+        [ -n "$t" ] && awk "BEGIN{exit !($t > 0)}" && return 0
+    done
+    return 1
+}
+
+# Wake-up light: the bulb fades in together with the volume (same duration), once, when sound first plays.
+light_started=0
+light() {
+    [ "${LIGHT_ENABLED:-no}" = yes ] && [ -n "${BULB_MAC:-}" ] && [ $light_started = 0 ] || return 0
+    light_started=1
+    systemctl stop radio-light.service 2>/dev/null
+    systemd-run --quiet --collect --unit=radio-light /usr/local/bin/bulb sunrise \
+        "$(awk "BEGIN{print $1/60}")" "${LIGHT_COLOR:-ffb060}" "${LIGHT_BRIGHT:-100}" \
+        && log "wake-up light: ${1}s fade to #${LIGHT_COLOR:-ffb060} ${LIGHT_BRIGHT:-100}%"
+}
+
+for _ in $(seq 30); do [ -S "$SOCK" ] && mpv_get idle-active >/dev/null && break; nap 1; done
+
+mode=${1:-play}
+case $mode in
+    play)
+        vol=$(cat "$STATE/volume" 2>/dev/null || echo "$VOLUME")
+        url=$(cat "$RUN/play-url" 2>/dev/null || echo "$STREAM_URL")   # set by "radio play [URL]"
+        ensure_bt || log "warning: speaker not connected"
+        while :; do                     # until "radio stop"; retry if the stream drops
+            if start "$url" "$vol" 2; then
+                while mpv_playing; do nap 2; done
+                log "stream ended, retrying"
+                vol=$(cat "$STATE/volume" 2>/dev/null || echo "$VOLUME")
+            else
+                log "stream failed to start, retrying in 5 s"
+            fi
+            nap 5
+        done ;;
+    alarm) minutes=$DURATION_MIN ;;
+    test)  minutes=$TEST_DURATION_MIN ;;
+    *) echo "usage: radio-player alarm|test|play" >&2; exit 2 ;;
+esac
+
+# --- alarm: stream for $minutes with fade-in, fall back to local sound -----
+log "alarm start: ${minutes} min, volume $VOLUME, fade ${FADE_SEC}s"
+ensure_bt || log "warning: speaker not connected, trying anyway"
+end=$(( $(now) + minutes * 60 ))
+fade=$FADE_SEC
+while [ "$(now)" -lt "$end" ]; do
+    if start "$STREAM_URL" "$VOLUME" "$fade"; then
+        light "$fade"
+        t0=$(now)
+        while mpv_playing && [ "$(now)" -lt "$end" ]; do nap 2; done
+        [ "$(now)" -ge "$end" ] && break
+        log "stream dropped after $(( $(now) - t0 ))s, reconnecting"
+    else
+        log "stream failed, playing fallback sound"
+        left=$(( end - $(now) ))
+        chunk=$(( left < 120 ? left : 120 ))  # fallback 2 min, then retry the stream
+        if start "$FALLBACK_SOUND" "$VOLUME" 10 '"loop-file":"inf"'; then
+            light 10
+            t1=$(now)
+            while mpv_playing && [ $(( $(now) - t1 )) -lt "$chunk" ]; do nap 2; done
+        else
+            log "fallback failed too (speaker?)"; nap 5
+        fi
+    fi
+    fade=3
+done
+log "alarm finished"

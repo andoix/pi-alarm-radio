@@ -1,0 +1,11 @@
+[Unit]
+Description=Alarm radio: create the (transient) alarm timer from the config at boot
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/radio-apply
+
+[Install]
+WantedBy=multi-user.target

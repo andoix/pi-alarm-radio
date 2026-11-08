@@ -1,0 +1,11 @@
+[Unit]
+Description=Alarm radio: keep the Bluetooth speaker connected
+After=bluetooth.service bluealsa.service
+
+[Service]
+ExecStart=/usr/local/bin/bt-watchdog
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

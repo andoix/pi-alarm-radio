@@ -1,0 +1,5 @@
+# personal build log (contains the home setup) — kept locally only
+PROGRESS.md
+# filled by the image workflow
+image/stage-alarmradio/00-install/files/
+.DS_Store
