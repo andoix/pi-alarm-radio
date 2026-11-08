@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04            # pi-gen-action is proven here (DNS failed in docker build on 26.04)
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
