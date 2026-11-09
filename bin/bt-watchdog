@@ -10,9 +10,10 @@ last_restart=0
 state=""
 
 while :; do
-    if [ -z "$SPEAKER_MAC" ]; then sleep 60; . /etc/alarm-radio.conf; continue; fi
+    # keep the adapter on even with no speaker yet, so "Find Bluetooth speakers" works on a fresh install
     rfkill list bluetooth | grep -q "Soft blocked: yes" && rfkill unblock bluetooth
     bluetoothctl show | grep -q "Powered: yes" || bluetoothctl power on >/dev/null
+    if [ -z "$SPEAKER_MAC" ]; then sleep 30; . /etc/alarm-radio.conf; continue; fi
 
     if bluetoothctl info "$SPEAKER_MAC" 2>/dev/null | grep -q "Connected: yes"; then
         [ "$state" != up ] && echo "speaker connected"

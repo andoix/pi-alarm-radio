@@ -221,6 +221,11 @@ MAC_RE = r"([0-9A-F]{2}:){5}[0-9A-F]{2}"
 
 def bt_scan():
     """Scan ~12 s, return nearby audio output devices (speakers/headphones) plus already paired ones."""
+    # a fresh install has no speaker yet, so nothing has powered the adapter on
+    run("rfkill", "unblock", "bluetooth", timeout=5)
+    run("bluetoothctl", "power", "on", timeout=10)
+    if "Powered: yes" not in run("bluetoothctl", "show", timeout=10)[1]:
+        raise ValueError("Bluetooth adapter not found or can't be powered on")
     run("bluetoothctl", "--timeout", "12", "scan", "on", timeout=25)
     current = read_conf().get("SPEAKER_MAC", "")
     out = []
@@ -287,7 +292,10 @@ class Handler(BaseHTTPRequestHandler):
             # captive portal: phones on the setup hotspot get the WiFi setup page for any URL
             self.send(200, SETUP_PAGE, "text/html; charset=utf-8")
         elif self.path == "/api/bt/scan":
-            self.send(200, json.dumps({"devices": bt_scan()}))
+            try:
+                self.send(200, json.dumps({"devices": bt_scan()}))
+            except ValueError as e:
+                self.send(200, json.dumps({"devices": [], "error": str(e)}))
         elif self.path == "/logo.png":
             try:
                 self.send(200, open(LOGO, "rb").read(), "image/png")
@@ -585,7 +593,7 @@ $("btscan").onclick=async()=>{
     $("btlist").innerHTML=r.devices.map(d=>`<div class="dev"><div><b>${esc(d.name)}</b>
       <span class="st">${d.current?"in use":d.paired?"paired":"new"}${d.rssi!=null?" · signal "+d.rssi+" dBm":""}</span></div>
       ${d.current?"":`<button data-mac="${esc(d.mac)}" data-name="${esc(d.name)}">Use</button>`}</div>`).join("");
-    btmsg(r.devices.length?"":"No speakers found. Is it on and in pairing mode?",r.devices.length?null:false);
+    btmsg(r.error||(r.devices.length?"":"No speakers found. Is it on and in pairing mode?"),r.devices.length?null:false);
     document.querySelectorAll("#btlist button").forEach(b=>b.onclick=()=>useSpeaker(b.dataset.mac,b.dataset.name));
   }catch(e){btmsg("Scan failed",false)}
   $("btscan").disabled=false;
