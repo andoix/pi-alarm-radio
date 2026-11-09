@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: *Which Raspberry Pi?* table (tested on Pi Zero W; other models with built-in WiFi + Bluetooth should work).
+
 ## 1.0.0-beta.5 — 2026-11-09
 
 - The radio's address is now **`pialarmradio.local`** (hostname `pialarmradio`), matching the product name.

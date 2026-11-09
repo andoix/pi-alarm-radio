@@ -4,14 +4,29 @@
 
 *by [North UP krafts](https://northup.ee), Haapsalu*
 
-An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with Bluetooth) that plays through a
-**Bluetooth speaker**. Everything is set up in a phone-friendly web page. No app and no cloud are needed.
+An alarm-clock web radio for a **Raspberry Pi with built-in WiFi and Bluetooth** (made on a Pi Zero W) that plays
+through a **Bluetooth speaker**. Everything is set up in a phone-friendly web page. No app and no cloud are needed.
 
 - **Alarm:** time, weekdays, station, volume, fade-in, how long it plays. If the internet is down, it plays a local chime instead.
 - **Radio:** a station picker (Estonian stations included, editable) or any http(s) MP3/AAC stream URL. Play, Stop and live volume.
 - **Any Bluetooth speaker:** find, pair and switch speakers from the web UI.
 - **Reliable:** starts at boot, reconnects the speaker on its own, keeps speakers from auto-powering-off,
   and keeps a persistent log so you can see what happened after an unexpected reboot.
+
+## Which Raspberry Pi?
+
+It needs WiFi and Bluetooth **built into the board**. The OS image is Raspberry Pi OS Lite 32-bit, which runs on every model.
+
+| Model | Built-in WiFi + Bluetooth | Status |
+|---|---|---|
+| Pi Zero W | yes | **Tested, works** |
+| Pi Zero 2 W | yes | Should work, not tested yet |
+| Pi 3 B / B+ / A+ | yes | Should work, not tested yet |
+| Pi 4, Pi 400 | yes | Should work, not tested yet |
+| Pi 5, Pi 500 | yes | Should work (32-bit OS), not tested yet |
+| Pi 1, Pi 2, Pi Zero (without W) | no | Not supported (would need USB WiFi and Bluetooth adapters) |
+
+Setup is over WiFi only. A network cable is not used for setup. If you try it on another model, please report how it went in a GitHub issue.
 
 ## Install
 
