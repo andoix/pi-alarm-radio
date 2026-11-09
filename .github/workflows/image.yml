@@ -21,7 +21,7 @@ jobs:
           cp -r bin systemd etc assets pi-setup.sh VERSION image/stage-alarmradio/00-install/files/alarm-radio/
           echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
-      - name: Build image (Raspberry Pi OS Lite 32-bit + PiAlarmRadio)
+      - name: Build image (Raspberry Pi OS Lite 32-bit + Pi Alarm Radio)
         id: build
         uses: usimd/pi-gen-action@v1
         with:
@@ -47,7 +47,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: PiAlarmRadio ${{ github.ref_name }}
+          name: Pi Alarm Radio ${{ github.ref_name }}
           body_path: release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}   # e.g. v1.0.0-beta.1
           files: ${{ steps.build.outputs.image-path }}

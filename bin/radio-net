@@ -66,6 +66,19 @@ def ip_addr():
     return m.group(1) if m else ""
 
 
+def mdns_name():
+    """the .local name avahi really announces (e.g. alarmradio-2.local if alarmradio is taken)"""
+    try:
+        out = subprocess.run(["busctl", "--system", "call", "org.freedesktop.Avahi", "/", "org.freedesktop.Avahi.Server",
+                              "GetHostNameFqdn"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r'"([^"]+)"', out)
+        if m:
+            return m.group(1)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip() + ".local"
+
+
 def write_state(**extra):
     os.makedirs(RUN, exist_ok=True)
     try:
@@ -74,7 +87,7 @@ def write_state(**extra):
         old = {}
     ssid = client_ssid()
     st = {**old, "mode": "client" if ssid else "ap" if ap_on() else "none", "ssid": ssid or "",
-          "ip": ip_addr(), "ap_ssid": AP, **extra}
+          "ip": ip_addr(), "ap_ssid": AP, "mdns": mdns_name(), **extra}
     tmp = STATE + ".tmp"
     with open(tmp, "w") as f:
         json.dump(st, f)

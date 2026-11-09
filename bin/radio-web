@@ -335,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
 PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PiAlarmRadio</title>
+<title>Pi Alarm Radio</title>
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="/logo.png" type="image/png">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
@@ -387,7 +387,7 @@ button.pri:hover{filter:brightness(1.08);background:var(--acc)}
 .dev b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dev button{flex:none;padding:8px 14px}
 </style></head><body><main>
-<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>PiAlarmRadio<small>by North UP krafts</small></h1></div>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>Pi Alarm Radio<small>by North UP krafts</small></h1></div>
 <div class="sub" id="next">&nbsp;</div>
 
 <div class="card" id="welcome" style="display:none;border-color:var(--acc)">
@@ -488,10 +488,10 @@ function show(s,form){
     document.querySelectorAll("#days input").forEach(c=>c.checked=s.days.includes(c.value));
   }
   $("spkname").textContent=s.speaker||"none";
-  $("ver").textContent="PiAlarmRadio "+(s.version||"");
+  $("ver").textContent="Pi Alarm Radio "+(s.version||"");
   $("welcome").style.display=!s.timezone_set?"":"none";
   const n=s.net||{};
-  $("netinfo").textContent=n.mode==="client"?`Connected to ${n.ssid}${n.ip?" ("+n.ip+")":""} · http://${s.host}.local`:n.mode==="ap"?"Setup hotspot is on":"—";
+  $("netinfo").textContent=n.mode==="client"?`Connected to ${n.ssid}${n.ip?" ("+n.ip+")":""} · http://${n.mdns||s.host+".local"}`:n.mode==="ap"?"Setup hotspot is on":"—";
   if(form)loadTz(s);
   $("next").textContent=s.enabled&&s.next?"Next alarm: "+s.next:"Alarm is off";
   $("speaker").innerHTML=`<span class="dot" style="background:var(--${s.connected?"ok":"bad"})"></span>${s.speaker} ${s.connected?"connected":"not connected"}`;
@@ -548,8 +548,9 @@ $("wchange").onclick=()=>{$("wform").style.display="";$("wchange").style.display
 
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let wifiHost="alarmradio.local";
 async function wifiInit(setup){
-  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;
+  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
   try{
     const nets=await (await fetch("/api/wifi/scan")).json();
@@ -566,7 +567,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or the radio's address from your router's device list). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;
@@ -605,11 +606,11 @@ async function useSpeaker(mac,name){
 SETUP_PAGE = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PiAlarmRadio setup</title>
+<title>Pi Alarm Radio setup</title>
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="/logo.png" type="image/png">
 <style>/*STYLE*/</style></head><body><main>
-<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>PiAlarmRadio setup<small>by North UP krafts</small></h1></div>
+<div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>Pi Alarm Radio setup<small>by North UP krafts</small></h1></div>
 <div class="sub">Connect the radio to your WiFi. Everything else (time zone, speaker, alarm) comes next, on your normal network.</div>
 <div class="card">/*WIFI_FORM*/</div>
 <div class="foot">by North UP krafts · northup.ee</div>
@@ -635,8 +636,9 @@ SETUP_PAGE = (SETUP_PAGE.replace("/*STYLE*/", PAGE.split("<style>")[1].split("</
 """).replace("/*WIFI_JS*/", r"""
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let wifiHost="alarmradio.local";
 async function wifiInit(setup){
-  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;
+  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
   try{
     const nets=await (await fetch("/api/wifi/scan")).json();
@@ -653,7 +655,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${location.hostname.match(/^\d/)?"alarmradio":location.hostname.split(".")[0]}.local — if it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or the radio's address from your router's device list). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;

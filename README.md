@@ -1,6 +1,6 @@
 <img src="assets/northup-logo.png" width="96" alt="North UP krafts" align="right">
 
-# PiAlarmRadio
+# Pi Alarm Radio
 
 *by [North UP krafts](https://northup.ee), Haapsalu*
 
@@ -18,10 +18,12 @@ An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with
 ### Option A: flash the ready-made image (easiest)
 
 1. Download `pialarmradio-<version>.img.xz` from the GitHub **Releases** page.
-2. In **Raspberry Pi Imager**, choose *Use custom* and pick the file. In the customisation settings, set the **WiFi** network and
-   password, the **user name** and password, the time zone, and enable SSH if you want it.
-   (Or skip the WiFi: the Pi then opens the setup network **PiAlarmRadio-Setup**, see below.)
-3. Boot the Pi, then open **http://alarmradio.local/** (or the Pi's IP address, which your router shows).
+2. In **Raspberry Pi Imager**, choose *Use custom*, pick the file, and write it to the SD card. No settings are needed. (Imager usually
+   doesn't offer its customisation settings for custom images, and the radio doesn't need them.)
+3. Boot the Pi. After 3–5 minutes (the first boot is slow) it opens the WiFi network **PiAlarmRadio-Setup**: continue with *First setup* below.
+
+*Advanced, optional:* for SSH access, put an empty file `ssh` on the SD card's `bootfs` drive, and a cloud-init
+`user-data` with a user and your SSH key (see the commented examples in the `user-data` file that's already there).
 
 ### Option B: install on Raspberry Pi OS Lite
 
@@ -48,7 +50,8 @@ unless you pass `FORCE_CONF=1`.
    Join it with your phone and the setup page opens by itself (or open any web address). Choose your network, enter the password, and press
    Connect. The setup network then disappears: reconnect the phone to your WiFi. If the Pi loses its WiFi for good later, the setup network
    comes back by itself, and Settings → *Change WiFi network* does the same while it's connected.
-2. Open **http://alarmradio.local/**. A welcome step suggests your phone's **time zone**.
+2. Open **http://alarmradio.local/**. If a second radio is on the same network, it becomes `alarmradio-2.local`, and the setup page and
+   Settings show the right address. A welcome step suggests your phone's **time zone**.
 3. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
    **Find Bluetooth speakers**, then press **Use** next to it. Speakers that are already paired switch over without pairing mode.
 4. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
