@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.5 — 2026-11-09
 
 - The radio's address is now **`pialarmradio.local`** (hostname `pialarmradio`), matching the product name.
 - The setup hotspot page shows where to find the radio after setup (`pialarmradio.local`, `-2` when there is
