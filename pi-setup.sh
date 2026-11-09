@@ -49,6 +49,7 @@ if [ ! -f /etc/alarm-radio-stations.txt ] || [ "${FORCE_CONF:-0}" = 1 ]; then
 fi
 mkdir -p /usr/local/share/alarm-radio
 install -m 644 "$SRC"/VERSION /usr/local/share/alarm-radio/VERSION
+[ -f "$SRC"/LICENSE ] && install -m 644 "$SRC"/LICENSE /usr/local/share/alarm-radio/LICENSE
 install -m 644 "$SRC"/assets/northup-logo.png /usr/local/share/alarm-radio/logo.png
 . /etc/alarm-radio.conf
 sed "s/SPEAKER_MAC/${SPEAKER_MAC:-00:00:00:00:00:00}/" "$SRC"/etc/asound.conf > /etc/asound.conf

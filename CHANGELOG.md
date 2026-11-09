@@ -5,7 +5,8 @@
 - **Station search:** *Find stations…* searches the free radio-browser.info directory by name and/or country. ▶ plays a station
   right away, **Add** puts it in your list, and *Remove from list* takes one out. The welcome step has *Find stations in my country*.
 - The phone's country is used as the default for the WiFi country on the setup page and for the station search.
-- License: GPL-3.0-or-later.
+- License: GPL-3.0-or-later. The license text is in the image, the installer download and `/usr/local/share/alarm-radio/`.
+- `install.sh` works with any number of Pis (it no longer stores every Pi's SSH key under one name).
 - README: *Known limitations (DIY risks)* and *Roadmap*.
 - **Installer download:** every release now has `pialarmradio-<version>-installer.tar.gz` next to the image, for a Pi that
   already runs Raspberry Pi OS (Bookworm or newer, 32- or 64-bit).

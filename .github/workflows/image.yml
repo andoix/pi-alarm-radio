@@ -18,7 +18,7 @@ jobs:
       - name: Put the radio into the pi-gen stage
         run: |
           mkdir -p image/stage-alarmradio/00-install/files/alarm-radio
-          cp -r bin systemd etc assets pi-setup.sh VERSION image/stage-alarmradio/00-install/files/alarm-radio/
+          cp -r bin systemd etc assets pi-setup.sh VERSION LICENSE image/stage-alarmradio/00-install/files/alarm-radio/
           echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
       - name: Build image (Raspberry Pi OS Lite 32-bit + Pi Alarm Radio)
@@ -45,7 +45,7 @@ jobs:
           sudo cp "${{ steps.build.outputs.image-path }}" "pialarmradio-$VERSION.img.xz"   # pi-gen's output is root's
           sudo chown "$(id -u):$(id -g)" "pialarmradio-$VERSION.img.xz"
           d="pialarmradio-$VERSION-installer"
-          mkdir "$d" && cp -r bin systemd etc assets pi-setup.sh install.sh VERSION README.md CHANGELOG.md "$d"/
+          mkdir "$d" && cp -r bin systemd etc assets pi-setup.sh install.sh VERSION LICENSE README.md CHANGELOG.md "$d"/
           rm -rf "$d"/bin/__pycache__
           tar czf "$d.tar.gz" "$d"
 
