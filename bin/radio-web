@@ -4,9 +4,12 @@
 Reads/writes /etc/alarm-radio.conf, then runs radio-apply. Standard library only.
 """
 import json
+import random
 import re
 import socket
 import subprocess
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CONF = "/etc/alarm-radio.conf"
@@ -91,6 +94,96 @@ def read_stations():
                 out.append({"name": name.strip(), "url": url.strip()})
     except OSError:
         pass
+    return out
+
+
+def write_stations(lines):
+    tmp = STATIONS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    subprocess.run(["mv", tmp, STATIONS])
+
+
+def station_add(d):
+    name = re.sub(r"[|\r\n\t]", " ", str(d.get("name", ""))).strip()[:80]
+    url = str(d.get("url", "")).strip()
+    if not name or not re.fullmatch(URL_RE, url):
+        raise ValueError("station needs a name and an http(s):// URL")
+    if any(x["url"] == url for x in read_stations()):
+        return f"{name} is already in the list"
+    try:
+        lines = open(STATIONS, encoding="utf-8").readlines()
+    except OSError:
+        lines = []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    write_stations(lines + [f"{name}|{url}\n"])
+    return f"added {name}"
+
+
+def station_remove(d):
+    url = str(d.get("url", "")).strip()
+    try:
+        lines = open(STATIONS, encoding="utf-8").readlines()
+    except OSError:
+        raise ValueError("no station list")
+    keep = [x for x in lines if x.strip().partition("|")[2].strip() != url or x.lstrip().startswith("#")]
+    if len(keep) == len(lines):
+        raise ValueError("not in the list")
+    write_stations(keep)
+    return "removed"
+
+
+def rb_servers():
+    """radio-browser.info mirrors, found the documented way (all.api... → reverse DNS)"""
+    names = []
+    try:
+        for ip in {a[4][0] for a in socket.getaddrinfo("all.api.radio-browser.info", 443, proto=socket.IPPROTO_TCP)}:
+            try:
+                names.append(socket.gethostbyaddr(ip)[0])
+            except OSError:
+                pass
+    except OSError:
+        pass
+    random.shuffle(names)
+    return names or ["de1.api.radio-browser.info", "fi1.api.radio-browser.info"]
+
+
+def station_search(d):
+    """search the free radio-browser.info directory by name and/or country"""
+    q = str(d.get("q", "")).strip()[:60]
+    cc = str(d.get("cc", "")).strip().upper()
+    if cc and not re.fullmatch(r"[A-Z]{2}", cc):
+        raise ValueError("country must be two letters, e.g. EE, DE, GB")
+    if not q and not cc:
+        raise ValueError("type a name or a country")
+    params = {"hidebroken": "true", "order": "clickcount", "reverse": "true", "limit": "60"}
+    if q:
+        params["name"] = q
+    if cc:
+        params["countrycode"] = cc
+    for host in rb_servers()[:3]:
+        try:
+            req = urllib.request.Request(f"https://{host}/json/stations/search?" + urllib.parse.urlencode(params),
+                                         headers={"User-Agent": f"PiAlarmRadio/{VERSION}"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                data = json.load(r)
+            break
+        except (OSError, ValueError):
+            continue
+    else:
+        raise ValueError("the station directory (radio-browser.info) can't be reached")
+    out, seen = [], set()
+    for x in data:
+        url = (x.get("url_resolved") or x.get("url") or "").strip()
+        name = re.sub(r"\s+", " ", str(x.get("name", ""))).strip()[:80]
+        if not name or not re.fullmatch(URL_RE, url) or url in seen:
+            continue
+        seen.add(url)
+        out.append({"name": name, "url": url, "country": x.get("countrycode", ""),
+                    "codec": x.get("codec", ""), "bitrate": x.get("bitrate") or 0})
+        if len(out) >= 30:
+            break
     return out
 
 
@@ -334,6 +427,13 @@ class Handler(BaseHTTPRequestHandler):
                 if url and not re.fullmatch(URL_RE, url):
                     raise ValueError("stream URL must be a plain http(s):// address")
                 msg = run("/usr/local/bin/radio", "play", *([url] if url else []))[1]
+            elif self.path == "/api/stations/search":
+                self.send(200, json.dumps({"ok": True, "stations": station_search(d)}))
+                return
+            elif self.path == "/api/stations/add":
+                msg = station_add(d)
+            elif self.path == "/api/stations/remove":
+                msg = station_remove(d)
             elif self.path == "/api/vol":
                 v = int(d.get("volume"))
                 msg = run("/usr/local/bin/radio", "vol", str(max(0, min(100, v))))[1]
@@ -384,7 +484,7 @@ strong{font-family:'Outfit',system-ui,sans-serif;font-weight:600;letter-spacing:
 .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 label.f{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
 input[type=time]{font-size:34px;font-weight:600;border:0;background:none;color:var(--ink);padding:0;width:100%}
-select,input[type=url]{width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+select,input[type=url],input.t{width:100%;font-size:15px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 input[type=range]{width:100%;accent-color:var(--acc)}
 .days{display:flex;gap:6px}
 .days label{flex:1}
@@ -418,9 +518,12 @@ button.pri:hover{filter:brightness(1.08);background:var(--acc)}
 
 <div class="card" id="welcome" style="display:none;border-color:var(--acc)">
   <strong>Welcome!</strong>
-  <div class="st" style="margin-top:4px">Three quick steps: 1. time zone (below) · 2. Bluetooth speaker (Speaker card at the bottom) · 3. alarm.</div>
-  <label class="f">Time zone</label>
+  <div class="st" style="margin-top:4px">Four quick steps: 1. time zone · 2. radio stations · 3. Bluetooth speaker (Speaker card at the bottom) · 4. alarm.</div>
+  <label class="f">1. Time zone</label>
   <div class="row"><select id="wtz"></select><button id="wtzsave" style="flex:none">Save</button></div>
+  <label class="f">2. Radio stations</label>
+  <div class="st">The list starts with Estonian stations.</div>
+  <button id="wst" style="width:100%;margin-top:8px">Find stations in my country</button>
 </div>
 
 <div class="card">
@@ -436,6 +539,16 @@ button.pri:hover{filter:brightness(1.08);background:var(--acc)}
 <div class="card">
   <label class="f" style="margin-top:0">Station</label>
   <select id="station"></select>
+  <div class="row" style="margin-top:8px"><button id="sfind">Find stations…</button><button id="sdel" style="flex:none;display:none">Remove from list</button></div>
+  <div id="sbox" style="display:none">
+    <div class="row" style="margin-top:8px">
+      <input class="t" type="text" id="sq" placeholder="Name (optional)" autocapitalize="off" autocorrect="off">
+      <input class="t" type="text" id="scc" maxlength="2" placeholder="Country" style="width:84px;flex:none;text-transform:uppercase">
+      <button id="sgo" style="flex:none">Search</button></div>
+    <div class="st" style="margin-top:6px">From the free <a href="https://www.radio-browser.info" target="_blank" rel="noopener" style="color:var(--acc)">radio-browser.info</a> directory. ▶ plays a station now, <b>Add</b> puts it in your list.</div>
+    <div id="slist"></div>
+    <div id="smsg" class="st" style="margin-top:8px"></div>
+  </div>
   <label class="f">Stream URL</label>
   <input type="url" id="url" placeholder="http://…">
   <label class="f">Volume <span class="val" id="volv"></span></label>
@@ -506,10 +619,11 @@ const upd=()=>{for(const k in fmt)$(k).textContent=fmt[k]();$("alarmfields").cla
 function stations(list,url){
   const sel=$("station");
   if(sel.options.length!==list.length+1)
-    sel.innerHTML=list.map(x=>`<option value="${x.url}">${x.name}</option>`).join("")+`<option value="">Other (enter URL)</option>`;
+    sel.innerHTML=list.map(x=>`<option value="${esc(x.url)}">${esc(x.name)}</option>`).join("")+`<option value="">Other (enter URL)</option>`;
   sel.value=list.some(x=>x.url===url)?url:"";
+  $("sdel").style.display=sel.value?"":"none";
 }
-$("station").addEventListener("change",()=>{if($("station").value)$("url").value=$("station").value;else $("url").focus()});
+$("station").addEventListener("change",()=>{$("sdel").style.display=$("station").value?"":"none";if($("station").value)$("url").value=$("station").value;else $("url").focus()});
 $("url").addEventListener("input",()=>stations([...$("station").options].filter(o=>o.value).map(o=>({name:o.text,url:o.value})),$("url").value.trim()));
 function show(s,form){
   if(form){
@@ -559,6 +673,45 @@ document.querySelectorAll("[data-a]").forEach(b=>b.onclick=async()=>{
 $("live").addEventListener("change",()=>api("vol",{volume:+$("live").value}));
 refresh(true);setInterval(()=>refresh(false),5000);
 
+// --- station search (radio-browser.info, via the radio) ---
+function smsg(t,ok){$("smsg").textContent=t;$("smsg").style.color=ok===false?"var(--bad)":ok?"var(--ok)":""}
+function openSearch(){$("sbox").style.display="";if(!$("scc").value)$("scc").value=phoneCC}
+$("sfind").onclick=()=>{if($("sbox").style.display)openSearch();else $("sbox").style.display="none"};
+async function searchStations(){
+  const q=$("sq").value.trim(),cc=$("scc").value.trim().toUpperCase();
+  if(!q&&!cc)return smsg("Type a name or a country code (e.g. EE, FI, DE, GB).",false);
+  $("sgo").disabled=true;$("slist").innerHTML="";smsg("Searching…");
+  try{
+    const r=await api("stations/search",{q,cc});
+    if(!r.ok){smsg(r.msg,false)}
+    else{
+      $("slist").innerHTML=r.stations.map((x,i)=>`<div class="dev"><div><b>${esc(x.name)}</b>
+        <span class="st">${esc(x.country)}${x.codec&&x.codec!=="UNKNOWN"?" · "+esc(x.codec):""}${x.bitrate?" "+x.bitrate+" kbps":""}</span></div>
+        <button data-i="${i}" data-s="try" title="Play now">▶</button><button data-i="${i}" data-s="add">Add</button></div>`).join("");
+      smsg(r.stations.length?"":"Nothing found. Try another name, or leave the name empty to list a country's popular stations.",r.stations.length?null:false);
+      $("slist").querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+        const x=r.stations[b.dataset.i];
+        if(b.dataset.s==="try"){const p=await api("play",{url:x.url});smsg(p.ok?"Playing "+x.name+" (Stop in Playback)":p.msg,p.ok);refresh(false);return}
+        const a=await api("stations/add",{name:x.name,url:x.url});
+        if(!a.ok)return smsg(a.msg,false);
+        stations(a.status.stations,x.url);$("url").value=x.url;
+        smsg(a.msg+". Press Save to use it for the alarm.",true);
+      });
+    }
+  }catch(e){smsg("Could not reach the radio",false)}
+  $("sgo").disabled=false;
+}
+$("sgo").onclick=searchStations;
+$("sq").addEventListener("keydown",e=>{if(e.key==="Enter")searchStations()});
+$("scc").addEventListener("keydown",e=>{if(e.key==="Enter")searchStations()});
+$("sdel").onclick=async()=>{
+  const sel=$("station"),name=sel.options[sel.selectedIndex].text;
+  if(!sel.value||!confirm("Remove "+name+" from the station list?"))return;
+  const r=await api("stations/remove",{url:sel.value});
+  if(r.ok){stations(r.status.stations,$("url").value);smsg("Removed "+name,true)}else alert(r.msg);
+};
+$("wst").onclick=()=>{openSearch();$("sq").value="";$("sbox").scrollIntoView({behavior:"smooth",block:"center"});if($("scc").value)searchStations()};
+
 // --- time zone ---
 let tzList=null;
 async function loadTz(s){
@@ -581,8 +734,10 @@ $("wchange").onclick=()=>{$("wform").style.display="";$("wchange").style.display
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let wifiHost="pialarmradio.local";
+// the phone's region (e.g. "et-EE" → EE): default WiFi country and station search country
+const phoneCC=(()=>{for(const l of (navigator.languages||[navigator.language||""])){const m=/[-_]([A-Za-z]{2})$/.exec(l||"");if(m)return m[1].toUpperCase()}return ""})();
 async function wifiInit(setup){
-  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
+  try{const n=await (await fetch("/api/net")).json();$("wcc").value=(setup&&phoneCC)||n.country||phoneCC;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
   try{
     const nets=await (await fetch("/api/wifi/scan")).json();
@@ -685,8 +840,10 @@ SETUP_PAGE = (SETUP_PAGE.replace("/*STYLE*/", PAGE.split("<style>")[1].split("</
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let wifiHost="pialarmradio.local";
+// the phone's region (e.g. "et-EE" → EE): default WiFi country and station search country
+const phoneCC=(()=>{for(const l of (navigator.languages||[navigator.language||""])){const m=/[-_]([A-Za-z]{2})$/.exec(l||"");if(m)return m[1].toUpperCase()}return ""})();
 async function wifiInit(setup){
-  try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
+  try{const n=await (await fetch("/api/net")).json();$("wcc").value=(setup&&phoneCC)||n.country||phoneCC;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
   try{
     const nets=await (await fetch("/api/wifi/scan")).json();

@@ -8,7 +8,8 @@ An alarm-clock web radio for a **Raspberry Pi with built-in WiFi and Bluetooth**
 through a **Bluetooth speaker**. Everything is set up in a phone-friendly web page. No app and no cloud are needed.
 
 - **Alarm:** time, weekdays, station, volume, fade-in, how long it plays. If the internet is down, it plays a local chime instead.
-- **Radio:** a station picker (Estonian stations included, editable) or any http(s) MP3/AAC stream URL. Play, Stop and live volume.
+- **Radio:** a station picker with **station search** (about 50,000 stations worldwide from the free radio-browser.info
+  directory, by name or country; Estonian stations are in the list to start with), or any http(s) stream URL. Play, Stop and live volume.
 - **Any Bluetooth speaker:** find, pair and switch speakers from the web UI.
 - **Reliable:** starts at boot, reconnects the speaker on its own, keeps speakers from auto-powering-off,
   and keeps a persistent log so you can see what happened after an unexpected reboot.
@@ -76,7 +77,9 @@ port 80. If the Pi loses its WiFi for good, it opens the **PiAlarmRadio-Setup** 
 2. Open **http://pialarmradio.local/** (see *Finding the radio's address* below). A welcome step suggests your phone's **time zone**.
 3. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
    **Find Bluetooth speakers**, then press **Use** next to it. Speakers that are already paired switch over without pairing mode.
-4. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
+4. **Stations:** *Find stations…* searches by name and/or country (your phone's country is filled in). ▶ plays a
+   station right away, **Add** puts it in your list, and *Remove from list* takes one out.
+5. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
 
 The speaker can only play from one source at a time, so disconnect phones from it.
 
@@ -93,6 +96,18 @@ The radio announces itself on your network as **`pialarmradio.local`** (mDNS/Bon
   remember an old answer for a while), use the radio's **IP address**. You can find it in your router's list of devices
   (as `pialarmradio`), and it's also shown in Settings → WiFi. A fixed (reserved) IP address in the router makes it
   easy to bookmark.
+
+## Known limitations (DIY risks)
+
+This is a DIY project. Know these before you rely on it to wake you up:
+
+- **The setup hotspot is open (no password).** While it's on (at first setup, or when the radio has lost its WiFi for a few
+  minutes), anyone nearby can join it and set the radio's WiFi. It turns off as soon as the radio is on a WiFi network again.
+- **The clock needs the internet after a power cut.** A Raspberry Pi has no clock battery. After a power cut it gets the time
+  from the internet. If the internet is down then, the clock is wrong until it comes back, and the alarm can be late or missed.
+  Short internet outages while the radio is running are fine (it keeps the time, and plays the fallback chime if the stream is down).
+- **The web page has no login.** Anyone on your home network can change the alarm. Use it on a network you trust.
+- **One speaker at a time.** If a phone is connected to the speaker, the radio can't play through it.
 
 ## Command line (on the Pi)
 
@@ -159,6 +174,20 @@ systemctl list-timers radio-alarm.timer
 
 1. Update `VERSION` and `CHANGELOG.md`.
 2. `git tag v$(cat VERSION) && git push --tags`. The workflow builds the image and creates the GitHub release.
+
+## Roadmap
+
+Ideas for later versions:
+
+- Snooze, and several alarms (for example, weekdays and weekends)
+- Radio name in Settings, so several radios are easy to tell apart without SSH
+- Update from the web page, and an uninstall script
+- Optional password for the web page
+
+## License
+
+Pi Alarm Radio is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License](LICENSE), version 3 or (at your option) any later version. © North UP krafts.
 
 ## Files
 
