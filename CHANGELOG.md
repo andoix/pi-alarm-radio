@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.6 — 2026-11-09
 
 - **Station search:** *Find stations…* searches the free radio-browser.info directory by name and/or country. ▶ plays a station
   right away, **Add** puts it in your list, and *Remove from list* takes one out. The welcome step has *Find stations in my country*.
