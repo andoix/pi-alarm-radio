@@ -599,7 +599,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or the radio's address from your router's device list). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost}. If another Pi Alarm Radio is already on that network, this one becomes ${wifiHost.replace(/\.local$/,"-2.local")}. If neither opens, use the radio's IP address from your router's device list. If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;
@@ -694,7 +694,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or the radio's address from your router's device list). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost}. If another Pi Alarm Radio is already on that network, this one becomes ${wifiHost.replace(/\.local$/,"-2.local")}. If neither opens, use the radio's IP address from your router's device list. If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;

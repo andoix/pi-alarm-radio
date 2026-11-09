@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Clearer help on the radio's web address: the setup page mentions `alarmradio-2.local` when another radio is on the
+  network, and the README has a *Finding the radio's address* section (several radios, `.local` not working, IP address).
+
 ## 1.0.0-beta.4 — 2026-11-09
 
 - Speaker card: **Keep speaker awake** switch (inaudible 20 Hz tone while idle, so speakers don't power off before
