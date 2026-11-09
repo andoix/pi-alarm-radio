@@ -40,24 +40,32 @@ Setup is over WiFi only. A network cable is not used for setup. If you try it on
 *Advanced, optional:* for SSH access, put an empty file `ssh` on the SD card's `bootfs` drive, and a cloud-init
 `user-data` with a user and your SSH key (see the commented examples in the `user-data` file that's already there).
 
-### Option B: install on Raspberry Pi OS Lite
+### Option B: installer for a Raspberry Pi that already runs Raspberry Pi OS
 
-Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (the Pi Zero W needs 32-bit). Set the hostname to `pialarmradio` and set up
-WiFi, user and SSH. Then, from a computer with this repository:
+For a Pi you already use, or one of the models in the table above. It needs **Raspberry Pi OS (Lite or Desktop,
+32- or 64-bit), Bookworm or newer**, with WiFi set up. The installer checks this first and stops without changing
+anything if something doesn't fit (old OS, no Bluetooth or WiFi, a network not managed by NetworkManager, or another
+web server on port 80).
 
-```sh
-ssh-copy-id <user>@pialarmradio.local     # optional, saves typing the password
-./install.sh <user>@pialarmradio.local
-```
+1. Download `pialarmradio-<version>-installer.tar.gz` from the GitHub **Releases** page onto the Pi, then:
 
-Or directly on the Pi:
+   ```sh
+   tar xzf pialarmradio-*-installer.tar.gz
+   cd pialarmradio-*-installer
+   sudo ./pi-setup.sh
+   ```
 
-```sh
-git clone https://github.com/andoix/pi-alarm-radio && cd pi-alarm-radio && sudo ./pi-setup.sh
-```
+2. Open `http://<the Pi's hostname>.local/` (the installer prints it). The installer doesn't change the hostname. To
+   use `pialarmradio.local`: `sudo raspi-config nonint do_hostname pialarmradio && sudo reboot`.
 
-The installer is safe to re-run (that's also how you update). An existing `/etc/alarm-radio.conf` is kept,
+From a computer, with this repository and SSH access to the Pi, `./install.sh <user>@<pi>.local` does the same.
+
+The installer is safe to re-run (that's also how you update). Your settings in `/etc/alarm-radio.conf` are kept,
 unless you pass `FORCE_CONF=1`.
+
+**What it changes on the system:** it installs packages (BlueZ, bluez-alsa, mpv, NetworkManager, avahi), its services and
+`/etc/asound.conf`, turns WiFi power saving off, makes the system log persistent (16 MB at most), and runs a web page on
+port 80. If the Pi loses its WiFi for good, it opens the **PiAlarmRadio-Setup** hotspot. Uninstalling isn't automated yet.
 
 ## First setup
 

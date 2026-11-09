@@ -6,6 +6,31 @@ SRC=$(cd "$(dirname "$0")" && pwd)
 LIVE=1; [ "${IMAGE_BUILD:-0}" = 1 ] && LIVE=0
 live() { [ $LIVE = 1 ]; }
 export DEBIAN_FRONTEND=noninteractive
+[ "$(id -u)" -eq 0 ] || { echo "run as root: sudo $0"; exit 1; }
+
+# --- checks before changing anything (skipped inside the image build) ---
+if live && [ "${SKIP_CHECKS:-0}" != 1 ]; then
+    fail() { echo "!! $*"; echo "   (SKIP_CHECKS=1 sudo $0 installs anyway, at your own risk)"; exit 1; }
+    . /etc/os-release
+    command -v apt-get >/dev/null && [ -d /run/systemd/system ] || fail "needs a Debian-based OS with apt and systemd (Raspberry Pi OS)"
+    case "${VERSION_CODENAME:-}" in
+        bookworm|trixie|forky) ;;
+        *) fail "needs Raspberry Pi OS / Debian 12 (bookworm) or newer, this is ${PRETTY_NAME:-unknown}" ;;
+    esac
+    ls /sys/class/bluetooth 2>/dev/null | grep -q hci || fail "no Bluetooth adapter found"
+    [ -d /sys/class/net/wlan0/wireless ] || fail "no WiFi (wlan0) found"
+    if systemctl is-active -q systemd-networkd || ls /etc/netplan/*.yaml >/dev/null 2>&1; then
+        fail "the network is managed by systemd-networkd/netplan; the radio needs NetworkManager (as on Raspberry Pi OS)"
+    fi
+    if ! systemctl is-enabled -q NetworkManager 2>/dev/null && ! systemctl is-active -q NetworkManager 2>/dev/null; then
+        fail "NetworkManager is not in use here; installing it could take over your network settings"
+    fi
+    if ss -ltnH 'sport = :80' 2>/dev/null | grep -q . && ! systemctl is-active -q radio-web; then
+        fail "port 80 is already used by another web server (the radio's web page needs it)"
+    fi
+    grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null ||
+        echo "note: this is not a Raspberry Pi ($(tr -d '\0' < /proc/device-tree/model 2>/dev/null || echo unknown)); untested"
+fi
 
 echo "== packages"
 apt-get update -q >/dev/null

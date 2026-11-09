@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Installer download:** every release now has `pialarmradio-<version>-installer.tar.gz` next to the image, for a Pi that
+  already runs Raspberry Pi OS (Bookworm or newer, 32- or 64-bit).
+- The installer checks the system first (OS version, Bluetooth, WiFi, NetworkManager, free port 80) and stops without
+  changing anything if it doesn't fit.
+- The image file is now named `pialarmradio-<version>.img.xz` (no date prefix).
 - README: *Which Raspberry Pi?* table (tested on Pi Zero W; other models with built-in WiFi + Bluetooth should work).
 
 ## 1.0.0-beta.5 — 2026-11-09

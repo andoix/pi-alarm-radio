@@ -40,6 +40,15 @@ jobs:
           compression: xz
           verbose-output: true
 
+      - name: Name the image and pack the installer
+        run: |
+          sudo cp "${{ steps.build.outputs.image-path }}" "pialarmradio-$VERSION.img.xz"   # pi-gen's output is root's
+          sudo chown "$(id -u):$(id -g)" "pialarmradio-$VERSION.img.xz"
+          d="pialarmradio-$VERSION-installer"
+          mkdir "$d" && cp -r bin systemd etc assets pi-setup.sh install.sh VERSION README.md CHANGELOG.md "$d"/
+          rm -rf "$d"/bin/__pycache__
+          tar czf "$d.tar.gz" "$d"
+
       - name: Release notes from CHANGELOG.md
         run: awk -v v="$VERSION" '$0 ~ "^## " {p = index($0, v) > 0; next} p' CHANGELOG.md > release-notes.md
 
@@ -50,12 +59,16 @@ jobs:
           name: Pi Alarm Radio ${{ github.ref_name }}
           body_path: release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}   # e.g. v1.0.0-beta.1
-          files: ${{ steps.build.outputs.image-path }}
+          files: |
+            pialarmradio-${{ env.VERSION }}.img.xz
+            pialarmradio-${{ env.VERSION }}-installer.tar.gz
 
       - name: Keep image as a workflow artifact (manual runs)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: pialarmradio-${{ env.VERSION }}
-          path: ${{ steps.build.outputs.image-path }}
+          path: |
+            pialarmradio-${{ env.VERSION }}.img.xz
+            pialarmradio-${{ env.VERSION }}-installer.tar.gz
           retention-days: 14
