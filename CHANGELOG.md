@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.4 — 2026-11-09
 
 - Speaker card: **Keep speaker awake** switch (inaudible 20 Hz tone while idle, so speakers don't power off before
   the alarm) with Low / Normal / Strong level.
