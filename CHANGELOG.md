@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0-beta.3 — 2026-11-09
+
+- Fix: on a fresh install (no speaker chosen yet) *Find Bluetooth speakers* could find nothing, because the Bluetooth
+  adapter was never switched on. The watchdog now keeps it on, the scan switches it on first, and a missing
+  adapter is shown as an error.
+- Tested on a Pi Zero W: setup hotspot → WiFi → pairing a JBL GO Essential → radio plays.
+
 ## 1.0.0-beta.2 — 2026-11-09
 
 First public beta of **Pi Alarm Radio** by North UP krafts.
