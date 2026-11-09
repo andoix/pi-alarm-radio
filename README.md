@@ -43,10 +43,10 @@ Setup is over WiFi only. A network cable is not used for setup. If you try it on
 
 ### Option B: installer for a Raspberry Pi that already runs Raspberry Pi OS
 
-For a Pi you already use, or one of the models in the table above. It needs **Raspberry Pi OS (Lite or Desktop,
-32- or 64-bit), Bookworm or newer**, with WiFi set up. The installer checks this first and stops without changing
-anything if something doesn't fit (old OS, no Bluetooth or WiFi, a network not managed by NetworkManager, or another
-web server on port 80).
+For a Pi you already use, or one of the models in the table above. It needs **Raspberry Pi OS Lite (32- or 64-bit),
+Bookworm or newer**, with WiFi set up. The Desktop version doesn't work: its sound system also claims Bluetooth speakers. The installer checks this first and stops without changing
+anything if something doesn't fit (old OS, a desktop system, no Bluetooth or WiFi, a network not managed by
+NetworkManager, or another web server on port 80). Ubuntu isn't supported yet.
 
 1. Download `pialarmradio-<version>-installer.tar.gz` from the GitHub **Releases** page onto the Pi, then:
 
@@ -183,6 +183,7 @@ Ideas for later versions:
 - Radio name in Settings, so several radios are easy to tell apart without SSH
 - Update from the web page, and an uninstall script
 - Optional password for the web page
+- Ubuntu support (Ubuntu Server on a Pi first; desktops would need to share the speaker with PipeWire)
 
 ## License
 

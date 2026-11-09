@@ -25,6 +25,11 @@ if live && [ "${SKIP_CHECKS:-0}" != 1 ]; then
     if ! systemctl is-enabled -q NetworkManager 2>/dev/null && ! systemctl is-active -q NetworkManager 2>/dev/null; then
         fail "NetworkManager is not in use here; installing it could take over your network settings"
     fi
+    # a desktop's sound server (PipeWire/PulseAudio) also claims Bluetooth speakers and fights bluez-alsa
+    for pkg in libspa-0.2-bluetooth pulseaudio-module-bluetooth; do
+        dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" &&
+            fail "this looks like a desktop system ($pkg is installed): use Raspberry Pi OS Lite"
+    done
     if ss -ltnH 'sport = :80' 2>/dev/null | grep -q . && ! systemctl is-active -q radio-web; then
         fail "port 80 is already used by another web server (the radio's web page needs it)"
     fi

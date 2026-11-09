@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Installer: stops on desktop systems (PipeWire/PulseAudio Bluetooth audio clashes with the radio). README: Raspberry Pi OS **Lite** only; Ubuntu in the roadmap.
+
 ## 1.0.0-beta.6 — 2026-11-09
 
 - **Station search:** *Find stations…* searches the free radio-browser.info directory by name and/or country. ▶ plays a station
