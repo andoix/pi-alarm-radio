@@ -73,6 +73,7 @@ Change settings in the web UI, or edit `/etc/alarm-radio.conf` and run `sudo rad
 - `VOLUME` is mpv's volume, which is perceptual (cubic): 50 ≈ 12 % amplitude. `radio vol N` changes the live volume.
 - `FADE_SEC` is the volume fade-in.
 - `KEEPALIVE_*`: an inaudible 20 Hz tone while idle, so speakers don't power off after ~20 min of silence.
+  Also in the web UI: Speaker → *Keep speaker awake* (on/off, level Low −55 / Normal −49 / Strong −40 dBFS).
 - **Stations:** `/etc/alarm-radio-stations.txt` holds one `Name|URL` per line. Avoid URLs that contain expiring tokens.
 
 ## How it works

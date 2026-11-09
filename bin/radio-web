@@ -99,6 +99,9 @@ def mpv_get(prop):
                "socat -t 2 - UNIX-CONNECT:/run/alarm-radio/mpv.sock", timeout=3)[1]
 
 
+KEEPALIVE_LEVELS = (-55, -49, -40)   # dBFS of the 20 Hz tone: low / normal / strong
+
+
 def status():
     c = read_conf()
     mac = c.get("SPEAKER_MAC", "")
@@ -133,6 +136,8 @@ def status():
         "net": net_state(),
         "version": VERSION,
         "speaker_mac": mac,
+        "keepalive": c.get("KEEPALIVE_ENABLED", "yes") == "yes",
+        "keepalive_gain": int(float(c.get("KEEPALIVE_GAIN", -49))),
     }
 
 
@@ -165,6 +170,17 @@ def save(d):
     if rc:
         raise ValueError(out)
     return out
+
+
+def set_keepalive(d):
+    gain = int(d.get("gain", -49))
+    if gain not in KEEPALIVE_LEVELS:
+        raise ValueError("bad keep-alive level")
+    write_conf({"KEEPALIVE_ENABLED": "yes" if d.get("enabled") else "no", "KEEPALIVE_GAIN": str(gain)})
+    rc, out = run("/usr/local/bin/radio-apply", timeout=60)
+    if rc:
+        raise ValueError(out)
+    return "keep-alive tone " + ("on" if d.get("enabled") else "off")
 
 
 def net_state():
@@ -321,6 +337,8 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/vol":
                 v = int(d.get("volume"))
                 msg = run("/usr/local/bin/radio", "vol", str(max(0, min(100, v))))[1]
+            elif self.path == "/api/keepalive":
+                msg = set_keepalive(d)
             elif self.path == "/api/bt/use":
                 msg = bt_use(d)
             elif self.path == "/api/wifi/connect":
@@ -449,6 +467,11 @@ button.pri:hover{filter:brightness(1.08);background:var(--acc)}
   <div class="st" style="margin-top:8px">A new speaker must be in pairing mode (usually: hold its Bluetooth button until the light blinks fast). Already paired speakers switch over directly.</div>
   <div id="btlist"></div>
   <div id="btmsg" class="st" style="margin-top:8px"></div>
+  <div class="row" style="margin-top:16px"><span>Keep speaker awake</span><label class="sw"><input type="checkbox" id="ka"><i></i></label></div>
+  <div class="st" style="margin-top:4px">Many speakers switch themselves off after ~20 minutes of silence and then miss the alarm. While the radio is idle this plays an inaudible 20 Hz tone so the speaker stays on. If yours still turns off, try a stronger level.</div>
+  <div id="kabox"><label class="f">Level</label>
+  <select id="kalevel"><option value="-55">Low</option><option value="-49">Normal</option><option value="-40">Strong</option></select></div>
+  <div id="kamsg" class="st" style="margin-top:8px"></div>
 </div>
 <div class="card">
   <strong>Settings</strong>
@@ -496,6 +519,7 @@ function show(s,form){
     document.querySelectorAll("#days input").forEach(c=>c.checked=s.days.includes(c.value));
   }
   $("spkname").textContent=s.speaker||"none";
+  if(form){$("ka").checked=s.keepalive;$("kalevel").value=String(s.keepalive_gain);$("kabox").style.display=s.keepalive?"":"none"}
   $("ver").textContent="Pi Alarm Radio "+(s.version||"");
   $("welcome").style.display=!s.timezone_set?"":"none";
   const n=s.net||{};
@@ -586,6 +610,13 @@ $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAla
 // --- Speaker (Bluetooth) ---
 const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function btmsg(t,ok){$("btmsg").textContent=t;$("btmsg").style.color=ok===false?"var(--bad)":ok?"var(--ok)":""}
+async function saveKa(){
+  $("kabox").style.display=$("ka").checked?"":"none";$("kamsg").textContent="Saving…";
+  try{const r=await api("keepalive",{enabled:$("ka").checked,gain:+$("kalevel").value});
+    $("kamsg").textContent=r.ok?"Saved.":r.msg;$("kamsg").style.color=r.ok?"var(--ok)":"var(--bad)"}
+  catch(e){$("kamsg").textContent="Could not reach the radio";$("kamsg").style.color="var(--bad)"}
+}
+$("ka").onchange=saveKa;$("kalevel").onchange=saveKa;
 $("btscan").onclick=async()=>{
   $("btscan").disabled=true;$("btlist").innerHTML="";btmsg("Scanning for about 15 seconds…");
   try{

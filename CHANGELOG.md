@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Speaker card: **Keep speaker awake** switch (inaudible 20 Hz tone while idle, so speakers don't power off before
+  the alarm) with Low / Normal / Strong level.
+
 ## 1.0.0-beta.3 — 2026-11-09
 
 - Fix: on a fresh install (no speaker chosen yet) *Find Bluetooth speakers* could find nothing, because the Bluetooth
