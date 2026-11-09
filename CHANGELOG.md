@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Clearer help on the radio's web address: the setup page mentions `alarmradio-2.local` when another radio is on the
+- The radio's address is now **`pialarmradio.local`** (hostname `pialarmradio`), matching the product name.
+- The setup hotspot page shows where to find the radio after setup (`pialarmradio.local`, `-2` when there is
+  already a radio, or the IP address from the router), with a tip to take a screenshot.
+- Clearer help on the radio's web address: the setup page mentions `pialarmradio-2.local` when another radio is on the
   network, and the README has a *Finding the radio's address* section (several radios, `.local` not working, IP address).
 
 ## 1.0.0-beta.4 — 2026-11-09

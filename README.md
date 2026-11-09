@@ -27,12 +27,12 @@ An alarm-clock web radio for a **Raspberry Pi Zero W** (or any Raspberry Pi with
 
 ### Option B: install on Raspberry Pi OS Lite
 
-Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (the Pi Zero W needs 32-bit). Set the hostname to `alarmradio` and set up
+Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (the Pi Zero W needs 32-bit). Set the hostname to `pialarmradio` and set up
 WiFi, user and SSH. Then, from a computer with this repository:
 
 ```sh
-ssh-copy-id <user>@alarmradio.local     # optional, saves typing the password
-./install.sh <user>@alarmradio.local
+ssh-copy-id <user>@pialarmradio.local     # optional, saves typing the password
+./install.sh <user>@pialarmradio.local
 ```
 
 Or directly on the Pi:
@@ -50,7 +50,7 @@ unless you pass `FORCE_CONF=1`.
    Join it with your phone and the setup page opens by itself (or open any web address). Choose your network, enter the password, and press
    Connect. The setup network then disappears: reconnect the phone to your WiFi. If the Pi loses its WiFi for good later, the setup network
    comes back by itself, and Settings → *Change WiFi network* does the same while it's connected.
-2. Open **http://alarmradio.local/** (see *Finding the radio's address* below). A welcome step suggests your phone's **time zone**.
+2. Open **http://pialarmradio.local/** (see *Finding the radio's address* below). A welcome step suggests your phone's **time zone**.
 3. **Speaker:** put the Bluetooth speaker in pairing mode (usually by holding its Bluetooth button until the light blinks fast), press
    **Find Bluetooth speakers**, then press **Use** next to it. Speakers that are already paired switch over without pairing mode.
 4. Set the **alarm**, pick a **station**, and press **Save**. **Test alarm** plays a short version right away.
@@ -59,16 +59,16 @@ The speaker can only play from one source at a time, so disconnect phones from i
 
 ### Finding the radio's address
 
-The radio announces itself on your network as **`alarmradio.local`** (mDNS/Bonjour).
+The radio announces itself on your network as **`pialarmradio.local`** (mDNS/Bonjour).
 
 - **More than one radio:** the name is first come, first served. The radio that starts second becomes
-  **`alarmradio-2.local`** (then `-3`, and so on). Which one gets the plain name can change after a power cut, so with several radios
+  **`pialarmradio-2.local`** (then `-3`, and so on). Which one gets the plain name can change after a power cut, so with several radios
   give each its own name (over SSH: `sudo raspi-config nonint do_hostname bedroom-radio && sudo reboot`). The real name is shown in **Settings → WiFi**.
 - **The setup page can't know it yet:** while your phone is on the setup hotspot, the radio is alone on that network,
-  so the page says `alarmradio.local`. Only once it's on your WiFi does it find out whether the name is taken.
+  so the page says `pialarmradio.local`. Only once it's on your WiFi does it find out whether the name is taken.
 - **If a `.local` name doesn't open** (some Android phones and Windows PCs don't support it, and phones sometimes
   remember an old answer for a while), use the radio's **IP address**. You can find it in your router's list of devices
-  (as `alarmradio`), and it's also shown in Settings → WiFi. A fixed (reserved) IP address in the router makes it
+  (as `pialarmradio`), and it's also shown in Settings → WiFi. A fixed (reserved) IP address in the router makes it
   easy to bookmark.
 
 ## Command line (on the Pi)
@@ -115,7 +115,7 @@ journalctl -u bluetooth -u bluealsa -n 50
 systemctl list-timers radio-alarm.timer
 ```
 
-- **`alarmradio.local` doesn't open:** see *Finding the radio's address* above.
+- **`pialarmradio.local` doesn't open:** see *Finding the radio's address* above.
 - **Speaker won't connect (`avdtp ... Permission denied`):** the pairing is lost. Put the speaker in pairing mode, remove it with
   `bluetoothctl remove <MAC>`, and pick it again in the web UI.
 - **The Pi reboots by itself:** check the power. Use a good 5 V ≥ 2 A supply and don't charge anything from the Pi.

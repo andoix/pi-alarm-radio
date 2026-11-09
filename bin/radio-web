@@ -580,7 +580,7 @@ $("wchange").onclick=()=>{$("wform").style.display="";$("wchange").style.display
 
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let wifiHost="alarmradio.local";
+let wifiHost="pialarmradio.local";
 async function wifiInit(setup){
   try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
@@ -599,7 +599,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost}. If another Pi Alarm Radio is already on that network, this one becomes ${wifiHost.replace(/\.local$/,"-2.local")}. If neither opens, use the radio's IP address from your router's device list. If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or ${wifiHost.replace(/(-\d+)?\.local$/,"-2.local")} if you already have a radio there). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;
@@ -651,13 +651,22 @@ SETUP_PAGE = r"""<!doctype html>
 <style>/*STYLE*/</style></head><body><main>
 <div class="brand"><img src="/logo.png" alt="North UP krafts"><h1>Pi Alarm Radio setup<small>by North UP krafts</small></h1></div>
 <div class="sub">Connect the radio to your WiFi. Everything else (time zone, speaker, alarm) comes next, on your normal network.</div>
+<div class="card">
+  <strong>After setup, open the radio at</strong>
+  <div style="font-size:22px;font-weight:600;margin:8px 0;color:var(--acc)"><span id="addr1">http://pialarmradio.local</span></div>
+  <div class="st">If you already have a Pi Alarm Radio on your WiFi, this one becomes
+    <b id="addr2">http://pialarmradio-2.local</b>. If neither opens (some Android phones and Windows PCs don't support
+    <code>.local</code> addresses), look up <b>pialarmradio</b> in your router's device list and open its IP address.<br>
+    <b>Tip:</b> take a screenshot of this box: the page closes when the radio leaves this setup network.</div>
+</div>
 <div class="card">/*WIFI_FORM*/</div>
 <div class="foot">by North UP krafts · northup.ee</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 /*WIFI_JS*/
-wifiInit(true);
+wifiInit(true).then(()=>{$("addr1").textContent="http://"+wifiHost;
+  $("addr2").textContent="http://"+wifiHost.replace(/(-\d+)?\.local$/,"-2.local")});
 </script></body></html>
 """
 SETUP_PAGE = (SETUP_PAGE.replace("/*STYLE*/", PAGE.split("<style>")[1].split("</style>")[0])
@@ -675,7 +684,7 @@ SETUP_PAGE = (SETUP_PAGE.replace("/*STYLE*/", PAGE.split("<style>")[1].split("</
 """).replace("/*WIFI_JS*/", r"""
 // --- WiFi form (setup page and Settings) ---
 const escw=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let wifiHost="alarmradio.local";
+let wifiHost="pialarmradio.local";
 async function wifiInit(setup){
   try{const n=await (await fetch("/api/net")).json();if(n.country)$("wcc").value=n.country;if(n.mdns)wifiHost=n.mdns;
       if(setup&&n.result&&n.result.state==="failed")wmsg("Could not connect to "+n.result.ssid+": "+n.result.msg,false)}catch(e){}
@@ -694,7 +703,7 @@ $("wgo").onclick=async()=>{
   try{
     const r=await (await fetch("/api/wifi/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ssid,psk,country:cc})})).json();
     if(!r.ok){wmsg(r.msg,false);$("wgo").disabled=false;return}
-    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost}. If another Pi Alarm Radio is already on that network, this one becomes ${wifiHost.replace(/\.local$/,"-2.local")}. If neither opens, use the radio's IP address from your router's device list. If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
+    wmsg(`Connecting to ${ssid}… This connection will now drop. Connect your phone to "${ssid}" and open http://${wifiHost} (or ${wifiHost.replace(/(-\d+)?\.local$/,"-2.local")} if you already have a radio there). If it didn't work, the "PiAlarmRadio-Setup" network comes back within a minute: join it again to see what went wrong.`,true);
   }catch(e){wmsg("No reply — the radio may already be switching networks.",null)}
 };
 $("whot").onclick=async()=>{if(!confirm("Disconnect from WiFi and open the PiAlarmRadio-Setup hotspot?"))return;

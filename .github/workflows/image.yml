@@ -29,7 +29,7 @@ jobs:
           pi-gen-version: master            # 32-bit (armhf): runs on the Pi Zero W too
           release: trixie
           stage-list: stage0 stage1 stage2 ./image/stage-alarmradio
-          hostname: alarmradio
+          hostname: pialarmradio
           timezone: Europe/Tallinn
           locale: en_GB.UTF-8
           keyboard-keymap: us

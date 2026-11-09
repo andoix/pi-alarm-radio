@@ -12,4 +12,4 @@ it also runs on the Pi Zero W). It installs the radio with `pi-setup.sh` (`IMAGE
 
 To build locally with Docker instead: clone pi-gen (`master` branch = 32-bit), copy this stage into it, fill
 `00-install/files/alarm-radio/` the same way, and run `./build-docker.sh` with a `config` containing
-`STAGE_LIST="stage0 stage1 stage2 stage-alarmradio"`, `IMG_NAME=pi-alarm-radio`, `TARGET_HOSTNAME=alarmradio`, `RELEASE=trixie`.
+`STAGE_LIST="stage0 stage1 stage2 stage-alarmradio"`, `IMG_NAME=pi-alarm-radio`, `TARGET_HOSTNAME=pialarmradio`, `RELEASE=trixie`.
