@@ -56,5 +56,5 @@ First public beta of **Pi Alarm Radio** by North UP krafts.
 - Ready-to-flash OS image (Raspberry Pi OS Lite 32-bit, trixie) built by GitHub Actions.
 - North UP krafts look: dark theme, gold accent, logo.
 
-Changes since 1.0.0-beta.1 (not published): renamed to Pi Alarm Radio, no light/bulb features, the image build installs from
+Changes since 1.0.0-beta.1 (not published): renamed to Pi Alarm Radio, the image build installs from
 /opt (the first build failed), real mDNS address shown.
