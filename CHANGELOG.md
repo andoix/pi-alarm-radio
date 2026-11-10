@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Installer: stops on desktop systems (PipeWire/PulseAudio Bluetooth audio clashes with the radio). README: Raspberry Pi OS **Lite** only; Ubuntu in the roadmap.
+- Installer: no longer refuses current Raspberry Pi OS Lite, which keeps its WiFi in netplan files run by NetworkManager.
+  Tested on a fresh Pi OS Lite (trixie, 2026-10-06) on a Pi Zero W: install, speaker pairing and test alarm work.
 
 ## 1.0.0-beta.6 — 2026-11-09
 

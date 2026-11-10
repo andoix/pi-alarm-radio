@@ -19,7 +19,9 @@ if live && [ "${SKIP_CHECKS:-0}" != 1 ]; then
     esac
     ls /sys/class/bluetooth 2>/dev/null | grep -q hci || fail "no Bluetooth adapter found"
     [ -d /sys/class/net/wlan0/wireless ] || fail "no WiFi (wlan0) found"
-    if systemctl is-active -q systemd-networkd || ls /etc/netplan/*.yaml >/dev/null 2>&1; then
+    # netplan files alone are fine: Raspberry Pi OS (2025+) keeps its WiFi in netplan with renderer NetworkManager
+    if systemctl is-active -q systemd-networkd ||
+        grep -qsE '^\s*renderer:\s*networkd' /etc/netplan/*.yaml; then
         fail "the network is managed by systemd-networkd/netplan; the radio needs NetworkManager (as on Raspberry Pi OS)"
     fi
     if ! systemctl is-enabled -q NetworkManager 2>/dev/null && ! systemctl is-active -q NetworkManager 2>/dev/null; then
