@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — 2026-11-10
+
+First stable release: the 1.0.0-beta.6 features, tested on a Pi Zero W with both the image and the installer
+(setup hotspot → WiFi → station search → Bluetooth speaker → overnight alarm).
 
 - Installer: stops on desktop systems (PipeWire/PulseAudio Bluetooth audio clashes with the radio). README: Raspberry Pi OS **Lite** only; Ubuntu in the roadmap.
 - Installer: no longer refuses current Raspberry Pi OS Lite, which keeps its WiFi in netplan files run by NetworkManager.
