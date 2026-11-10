@@ -50,7 +50,7 @@ jobs:
           tar czf "$d.tar.gz" "$d"
 
       - name: Release notes from CHANGELOG.md
-        run: awk -v v="$VERSION" '$0 ~ "^## " {p = index($0, v) > 0; next} p' CHANGELOG.md > release-notes.md
+        run: awk -v v="$VERSION" '/^## / {p = ($2 == v); next} p' CHANGELOG.md > release-notes.md   # exact: 1.0.0 must not match 1.0.0-beta.x
 
       - name: Attach image to the GitHub release
         if: startsWith(github.ref, 'refs/tags/')
